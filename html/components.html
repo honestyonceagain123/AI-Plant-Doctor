@@ -1,0 +1,22 @@
+<!-- html/components.html -->
+<div style="position: fixed; bottom: 20px; right: 20px; z-index: 9999; width: 360px; height: 500px;">
+  <df-messenger
+    intent="WELCOME"
+    chat-title="AI_Plant_Doctor_Bot"
+    agent-id="c30b069b-18aa-4618-a7ba-884fd78267df"
+    language-code="en">
+  </df-messenger>
+</div>
+
+<script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
+
+<style>
+df-messenger {
+    --df-messenger-bot-message: #70e000;
+    --df-messenger-button-titlebar-color: #38b000;
+    --df-messenger-chat-background-color: #f0fff0;
+    --df-messenger-font-color: #2e7d32;
+    width: 100%;
+    height: 100%;
+}
+</style>

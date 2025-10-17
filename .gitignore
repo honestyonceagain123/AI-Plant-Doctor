@@ -1,0 +1,14 @@
+__pycache__/
+env/
+tfenv/
+*.pth
+*.zip
+*.pyd
+*.dll
+*.log
+*.mp4
+*.mp3
+*.jpg
+*.jpeg
+*.png
+.DS_Store
