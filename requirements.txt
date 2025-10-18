@@ -14,3 +14,4 @@ blinker==1.7.0
 rich==13.7.1
 markdown-it-py==3.0.0
 mdurl==0.1.2
+deep-translator==1.11.4
