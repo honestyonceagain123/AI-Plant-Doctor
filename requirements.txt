@@ -1,3 +1,8 @@
+streamlit>=1.50.0
+rich==14.2.0
+markdown-it-py==4.0.0
+mdurl==0.1.2
+pygments==2.19.2
 altair==5.5.0
 astroid==3.3.11
 attrs==25.4.0
