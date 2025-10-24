@@ -69,8 +69,6 @@ lang_codes = {
 # -----------------------------
 # 🎨 STYLING
 # -----------------------------
-st.set_page_config(page_title="🍃 AI Plant Doctor", layout="wide")
-
 st.markdown("""
 <style>
 body {
