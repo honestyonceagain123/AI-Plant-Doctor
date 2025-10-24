@@ -69,6 +69,7 @@ lang_codes = {
 # -----------------------------
 # 🎨 STYLING
 # -----------------------------
+st.set_page_config(page_title="🍃 AI Plant Doctor", layout="wide")
 
 st.markdown("""
 <style>
@@ -137,7 +138,7 @@ st.markdown(f"<h1>{main_title}</h1>", unsafe_allow_html=True)
 st.markdown(f"<h4 style='text-align:center;font-weight:600;'>{subtitle}</h4>", unsafe_allow_html=True)
 
 # -----------------------------
-# 📤 IMAGE UPLOAD
+# 📤 IMAGE UPLOAD + PREDICTION
 # -----------------------------
 st.markdown('<div class="upload-box">', unsafe_allow_html=True)
 upload_label = "📸 Upload a leaf image"
@@ -150,57 +151,52 @@ if selected_lang != "English":
 uploaded_file = st.file_uploader(upload_label, type=["jpg", "jpeg", "png"])
 st.markdown('</div>', unsafe_allow_html=True)
 
-# -----------------------------
-# 🧠 PREDICTION
-# -----------------------------
 if uploaded_file is not None:
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption="🖼️ Uploaded Leaf", use_container_width=True)
+    try:
+        # Load image safely
+        image = Image.open(uploaded_file).convert("RGB")
+        st.image(image, caption="🖼️ Uploaded Leaf", use_container_width=True)
 
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-    ])
-    img_tensor = transform(image).unsqueeze(0).to(device)
+        # Preprocess for model
+        transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+        img_tensor = transform(image).unsqueeze(0).to(device)
 
-    with st.spinner("🔍 Analyzing the image..."):
-        outputs = model(img_tensor)
-        _, preds = torch.max(outputs, 1)
+        # Prediction
+        with st.spinner("🔍 Analyzing the image..."):
+            outputs = model(img_tensor)
+            _, preds = torch.max(outputs, 1)
 
-    class_names = list(treatment_info.keys())
-    predicted_class = class_names[preds.item()]
-    formatted_class = predicted_class.replace("__", " ").replace("_", " ").title()
-    treatment_text = treatment_info[predicted_class]
+        class_names = list(treatment_info.keys())
+        predicted_class = class_names[preds.item()]
+        formatted_class = predicted_class.replace("__", " ").replace("_", " ").title()
+        treatment_text = treatment_info[predicted_class]
 
-    disease_label = "Disease Detected"
-    treatment_label = "Recommended Treatment"
+        disease_label = "Disease Detected"
+        treatment_label = "Recommended Treatment"
 
-    if selected_lang != "English":
-        try:
-            disease_label = translator.translate(disease_label)
-            treatment_label = translator.translate(treatment_label)
-            formatted_class = translator.translate(formatted_class)
-            treatment_text = translator.translate(treatment_text)
-        except:
-            st.warning("⚠️ Translation temporarily unavailable. Showing English text.")
+        if selected_lang != "English":
+            try:
+                disease_label = translator.translate(disease_label)
+                treatment_label = translator.translate(treatment_label)
+                formatted_class = translator.translate(formatted_class)
+                treatment_text = translator.translate(treatment_text)
+            except:
+                st.warning("⚠️ Translation temporarily unavailable. Showing English text.")
 
-    st.markdown('<div class="result-card">', unsafe_allow_html=True)
-    st.subheader(f"🌿 {disease_label}:")
-    st.markdown(f"<h2 style='color:#a5d6a7;font-weight:800;'>{formatted_class}</h2>", unsafe_allow_html=True)
-    st.markdown(f"### 💊 {treatment_label}:")
-    st.markdown(f"<p style='font-size:1.15rem; font-weight:600; color:#e8f5e9;'>{treatment_text}</p>", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+        # Display result
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
+        st.subheader(f"🌿 {disease_label}:")
+        st.markdown(f"<h2 style='color:#a5d6a7;font-weight:800;'>{formatted_class}</h2>", unsafe_allow_html=True)
+        st.markdown(f"### 💊 {treatment_label}:")
+        st.markdown(f"<p style='font-size:1.15rem; font-weight:600; color:#e8f5e9;'>{treatment_text}</p>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-
-import streamlit as st
-import streamlit.components.v1 as components
-
-# Load Dialogflow Messenger
-with open("html/components.html", "r", encoding="utf-8") as f:
-    html_content = f.read()
-
-components.html(html_content, height=500, scrolling=True)
+    except Exception as e:
+        st.error(f"⚠️ Failed to process the uploaded image. Details: {e}")
 
 
 # -----------------------------
