@@ -187,26 +187,27 @@ if uploaded_file is not None:
             except:
                 st.warning("⚠️ Translation temporarily unavailable. Showing English text.")
 
-       # Display result with larger, readable treatment
-st.markdown('<div class="result-card">', unsafe_allow_html=True)
+               # Display result with larger, readable treatment
+        st.markdown('<div class="result-card">', unsafe_allow_html=True)
 
-# 🌿 Disease Detected
-st.markdown(f"<h3 style='color:#1b5e20; font-weight:800;'>🌿 {disease_label}:</h3>", unsafe_allow_html=True)
-st.markdown(
-    f"<p style='font-size:1.5rem; font-weight:700; color:#000000; background-color:#a5d6a7; padding:15px; border-radius:10px;'>"
-    f"{formatted_class}</p>",
-    unsafe_allow_html=True
-)
+        # 🌿 Disease Detected
+        st.markdown(f"<h3 style='color:#1b5e20; font-weight:800;'>🌿 {disease_label}:</h3>", unsafe_allow_html=True)
+        st.markdown(
+            f"<p style='font-size:1.5rem; font-weight:700; color:#000000; background-color:#a5d6a7; padding:15px; border-radius:10px;'>"
+            f"{formatted_class}</p>",
+            unsafe_allow_html=True
+        )
 
-# 💊 Recommended Treatment
-st.markdown(f"<h3 style='margin-top:15px; color:#2e7d32; font-weight:800;'>💊 {treatment_label}:</h3>", unsafe_allow_html=True)
-st.markdown(
-    f"<p style='font-size:1.25rem; font-weight:600; line-height:1.6; color:#000000; background-color:#c8e6c9; padding:15px; border-radius:10px;'>"
-    f"{treatment_text}</p>",
-    unsafe_allow_html=True
-)
+        # 💊 Recommended Treatment
+        st.markdown(f"<h3 style='margin-top:15px; color:#2e7d32; font-weight:800;'>💊 {treatment_label}:</h3>", unsafe_allow_html=True)
+        st.markdown(
+            f"<p style='font-size:1.25rem; font-weight:600; line-height:1.6; color:#000000; background-color:#c8e6c9; padding:15px; border-radius:10px;'>"
+            f"{treatment_text}</p>",
+            unsafe_allow_html=True
+        )
 
-st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
 
 
     except Exception as e:
