@@ -153,7 +153,7 @@ if uploaded_file is not None:
     try:
         # Load image safely
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="🖼️ Uploaded Leaf", use_column_width=True)
+        st.image(image, caption="🖼️ Uploaded Leaf", use_container_width=True)
 
         # Preprocess for model
         transform = transforms.Compose([
