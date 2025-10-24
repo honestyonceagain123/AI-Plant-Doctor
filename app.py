@@ -136,7 +136,7 @@ st.markdown(f"<h1>{main_title}</h1>", unsafe_allow_html=True)
 st.markdown(f"<h4 style='text-align:center;font-weight:600;'>{subtitle}</h4>", unsafe_allow_html=True)
 
 # -----------------------------
-# 📤 IMAGE UPLOAD + PREDICTION
+# 📤 IMAGE UPLOAD + PREDICTION + TREATMENT
 # -----------------------------
 st.markdown('<div class="upload-box">', unsafe_allow_html=True)
 upload_label = "📸 Upload a leaf image"
@@ -153,7 +153,7 @@ if uploaded_file is not None:
     try:
         # Load image safely
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="🖼️ Uploaded Leaf", width=700)  # fixed
+        st.image(image, caption="🖼️ Uploaded Leaf", use_column_width=True)
 
         # Preprocess for model
         transform = transforms.Compose([
@@ -185,38 +185,34 @@ if uploaded_file is not None:
             except:
                 st.warning("⚠️ Translation temporarily unavailable. Showing English text.")
 
-        # Display result
+        # Display result with larger, readable treatment
         st.markdown('<div class="result-card">', unsafe_allow_html=True)
         st.subheader(f"🌿 {disease_label}:")
         st.markdown(f"<h2 style='color:#a5d6a7;font-weight:800;'>{formatted_class}</h2>", unsafe_allow_html=True)
-        st.markdown(f"### 💊 {treatment_label}:")
-        
-        # Improved treatment display
-        st.markdown(f"""
-        <div style='
-            max-height: 250px;
-            overflow-y: auto;
-            background-color: #1e1e1e;
-            padding: 15px;
-            border-radius: 10px;
-            font-size: 1.3rem;
-            font-weight: 600;
-            color: #e8f5e9;
-        '>
-        {treatment_text.replace("\n", "<br>")}
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown(f"<h3 style='margin-top:15px; color:#b2dfdb;'>💊 {treatment_label}:</h3>", unsafe_allow_html=True)
+        st.markdown(f"<p style='font-size:1.25rem; font-weight:600; line-height:1.6; color:#e8f5e9;'>{treatment_text}</p>", unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
-
-        # Chatbot section
-        import streamlit.components.v1 as components
-        with st.expander("💬 Chat with AI Plant Doctor"):
-            with open("html/components.html", "r", encoding="utf-8") as f:
-                chatbot_html = f.read()
-            components.html(chatbot_html, height=500, scrolling=True)
 
     except Exception as e:
         st.error(f"⚠️ Failed to process the uploaded image. Details: {e}")
+
+# -----------------------------
+# 💬 CHATBOT INTEGRATION (Dialogflow)
+# -----------------------------
+st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown("<h3 style='color:#81c784; text-align:center;'>Chat with our AI Assistant</h3>", unsafe_allow_html=True)
+
+chatbot_html = """
+<script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
+<df-messenger
+  intent="WELCOME"
+  chat-title="Education_App_Bot"
+  agent-id="4aaa36e0-4df6-4743-aa90-651e33adc562"
+  language-code="en"
+></df-messenger>
+"""
+st.components.v1.html(chatbot_html, height=500, scrolling=True)
+
 
 
 
