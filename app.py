@@ -192,7 +192,12 @@ if uploaded_file is not None:
         st.subheader(f"🌿 {disease_label}:")
         st.markdown(f"<h2 style='color:#a5d6a7;font-weight:800;'>{formatted_class}</h2>", unsafe_allow_html=True)
         st.markdown(f"<h3 style='margin-top:15px; color:#b2dfdb;'>💊 {treatment_label}:</h3>", unsafe_allow_html=True)
-        st.markdown(f"<p style='font-size:1.25rem; font-weight:600; line-height:1.6; color:#e8f5e9;'>{treatment_text}</p>", unsafe_allow_html=True)
+        st.markdown(
+    f"<p style='font-size:1.25rem; font-weight:600; line-height:1.6; color:#000000; background-color:#c8e6c9; padding:15px; border-radius:10px;'>"
+    f"{treatment_text}</p>",
+    unsafe_allow_html=True
+)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
     except Exception as e:
