@@ -1,4 +1,6 @@
 import streamlit as st
+# ✅ This must be the first Streamlit command
+st.set_page_config(page_title="🍃 AI Plant Doctor", layout="wide")
 import torch
 from torchvision import models, transforms
 from PIL import Image
