@@ -153,8 +153,7 @@ if uploaded_file is not None:
     try:
         # Load image safely
         image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="🖼️ Uploaded Leaf", width=700)
-
+        st.image(image, caption="🖼️ Uploaded Leaf", width=700)  # fixed
 
         # Preprocess for model
         transform = transforms.Compose([
@@ -191,11 +190,34 @@ if uploaded_file is not None:
         st.subheader(f"🌿 {disease_label}:")
         st.markdown(f"<h2 style='color:#a5d6a7;font-weight:800;'>{formatted_class}</h2>", unsafe_allow_html=True)
         st.markdown(f"### 💊 {treatment_label}:")
-        st.markdown(f"<p style='font-size:1.15rem; font-weight:600; color:#e8f5e9;'>{treatment_text}</p>", unsafe_allow_html=True)
+        
+        # Improved treatment display
+        st.markdown(f"""
+        <div style='
+            max-height: 250px;
+            overflow-y: auto;
+            background-color: #1e1e1e;
+            padding: 15px;
+            border-radius: 10px;
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #e8f5e9;
+        '>
+        {treatment_text.replace("\n", "<br>")}
+        </div>
+        """, unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
+
+        # Chatbot section
+        import streamlit.components.v1 as components
+        with st.expander("💬 Chat with AI Plant Doctor"):
+            with open("html/components.html", "r", encoding="utf-8") as f:
+                chatbot_html = f.read()
+            components.html(chatbot_html, height=500, scrolling=True)
 
     except Exception as e:
         st.error(f"⚠️ Failed to process the uploaded image. Details: {e}")
+
 
 
 # -----------------------------
