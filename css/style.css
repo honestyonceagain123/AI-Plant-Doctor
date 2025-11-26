@@ -1,0 +1,33 @@
+body {
+    background-color: #f0f8ff;
+    font-family: 'Arial', sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    width: 80%;
+    margin: auto;
+    text-align: center;
+    padding-top: 50px;
+}
+
+h1 {
+    color: #2e8b57;
+}
+
+.upload-box {
+    border: 2px dashed #2e8b57;
+    padding: 30px;
+    margin: 20px auto;
+    border-radius: 15px;
+    background-color: #e6f7f0;
+}
+
+.result-card {
+    background-color: #d1ffd6;
+    padding: 20px;
+    border-radius: 10px;
+    margin-top: 20px;
+    font-size: 20px;
+}

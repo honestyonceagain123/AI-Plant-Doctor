@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>PlantApp 🌿</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="chat-container">
+      <div id="chat-box"></div>
+      <div class="input-area">
+        <input type="text" id="user-input" placeholder="Type your message..." />
+        <button id="send-btn">➤</button>
+      </div>
+    </div>
+
+    <div class="translate-panel" id="translate-panel">
+      <h3>🌍 Translate</h3>
+      <textarea id="translate-input" placeholder="Enter text to translate..."></textarea>
+      <select id="target-lang">
+        <option value="en">English</option>
+        <option value="hi">Hindi</option>
+        <option value="es">Spanish</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+      </select>
+      <button id="translate-btn">Translate</button>
+      <p id="translation-result"></p>
+    </div>
+
+    <button id="toggle-btn">⇄</button>
+    <img src="/static/chatbot-icon.png" id="chatbot-icon" alt="Chatbot Icon">
+  </div>
+
+  <script>
+    const sendBtn = document.getElementById("send-btn");
+    const userInput = document.getElementById("user-input");
+    const chatBox = document.getElementById("chat-box");
+    const translateBtn = document.getElementById("translate-btn");
+    const toggleBtn = document.getElementById("toggle-btn");
+    const translatePanel = document.getElementById("translate-panel");
+
+    sendBtn.addEventListener("click", async () => {
+      const message = userInput.value.trim();
+      if (!message) return;
+
+      chatBox.innerHTML += `<div class='user-msg'>${message}</div>`;
+      userInput.value = "";
+
+      const response = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+
+      const data = await response.json();
+      chatBox.innerHTML += `<div class='bot-msg'>${data.reply}</div>`;
+      chatBox.scrollTop = chatBox.scrollHeight;
+    });
+
+    translateBtn.addEventListener("click", async () => {
+      const text = document.getElementById("translate-input").value;
+      const target_lang = document.getElementById("target-lang").value;
+
+      const response = await fetch("/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, target_lang }),
+      });
+
+      const data = await response.json();
+      document.getElementById("translation-result").innerText = data.translated_text || data.error;
+    });
+
+    toggleBtn.addEventListener("click", () => {
+      translatePanel.classList.toggle("open");
+    });
+  </script>
+</body>
+</html>
