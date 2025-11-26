@@ -72,8 +72,6 @@ termcolor==3.1.0
 threadpoolctl==3.6.0
 tokenizers==0.15.2
 toml==0.10.2
-torch==2.1.2+cu118
-torchvision==0.16.2+cu118
 tornado==6.5.2
 tqdm==4.67.1
 transformers==4.35.2
