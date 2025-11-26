@@ -74,6 +74,7 @@ def load_classifier(weight_path="best_plant_model.pth"):
         # Fallback for deployment environments that might not have the model file in the root
         # This allows the app to load and show the UI, but prediction will fail.
         st.error(f"Classifier weight missing: {weight_path}. Prediction disabled.")
+        st.session_state.analysis_error = f"Classifier model file '{weight_path}' not found in the repository."
         return None
     try:
         state = torch.load(weight_path, map_location=DEVICE)
@@ -88,6 +89,7 @@ def load_classifier(weight_path="best_plant_model.pth"):
         model.eval()
     except Exception as e:
         st.error(f"Error loading model weights: {e}")
+        st.session_state.analysis_error = f"Error loading model weights: {e}"
         return None
 
     return model
@@ -413,6 +415,7 @@ def main():
     if 'risk_analyzed' not in st.session_state: st.session_state.risk_analyzed = False
     if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
     if 'visuals_error' not in st.session_state: st.session_state.visuals_error = None
+    if 'analysis_error' not in st.session_state: st.session_state.analysis_error = ""
 
 
     # show GPU info once in sidebar
@@ -535,10 +538,14 @@ def main():
         st.session_state.risk_audio_bytes = b"" # Clear audio cache
         st.session_state.leaf_img = None
         st.session_state.plant_img = None
+        st.session_state.analysis_error = "" # Clear previous error
         
         # 1. Classification
         model = load_classifier()
-        if model is None: return
+        if model is None: 
+            # The error message was already set in load_classifier via st.session_state.analysis_error
+            st.rerun() 
+            return
 
         class_names = get_class_names()
         with st.spinner(t("Running classifier...")):
@@ -566,6 +573,9 @@ def main():
     # ----------------------------------------------------
     # PERSISTENT RESULTS DISPLAY
     # ----------------------------------------------------
+    if st.session_state.analysis_error:
+        st.error(st.session_state.analysis_error)
+    
     if st.session_state.analyzed:
         # Display Prediction
         st.success(f"🌿 {t('Prediction')}: {t(st.session_state.prediction)}")
