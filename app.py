@@ -535,7 +535,7 @@ def main():
 
 
     # Display the image persistently
-    st.image(image, caption=t("Uploaded Image"), use_container_width=True)
+    st.image(image, caption=t("Uploaded Image"), width='stretch')
 
     # ----------------------------------------------------
     # ANALYSIS BUTTON LOGIC
@@ -713,10 +713,10 @@ def main():
                 c1, c2 = st.columns(2)
                 with c1:
                     st.subheader(t("Healthy Leaf (AI-Repaired)"))
-                    st.image(st.session_state.leaf_img, use_column_width=True)
+                    st.image(st.session_state.leaf_img, width='stretch')
                 with c2:
                     st.subheader(t("Healthy Plant (AI)"))
-                    st.image(st.session_state.plant_img, use_container_width=True) # Use container width for better look
+                    st.image(st.session_state.plant_img, width='stretch') # Used width='stretch' instead of use_container_width=True
             elif not st.session_state.visuals_generated and st.session_state.analyzed:
                 st.info(t("Click the 'Generate AI Visuals' button above to create model images."))
 
