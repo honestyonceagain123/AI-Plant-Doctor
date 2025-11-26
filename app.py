@@ -219,14 +219,13 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
 # OpenAI treatment (English)
 # --------------------------
 def generate_treatment_with_ai(disease_name: str) -> str:
-    if "OPENAI_API_KEY" not in st.secrets or len(st.secrets.get("OPENAI_API_KEY", "")) < 10: # Added length check
-        return "⚠️ OPENAI_API_KEY missing or invalid in Streamlit secrets."
+    key = st.secrets.get("OPENAI_API_KEY", "")
     
-    key = st.secrets["OPENAI_API_KEY"]
-    if key.startswith("sk-YOUR"):
-         return "⚠️ OPENAI_API_KEY is present but appears to be a placeholder or invalid."
+    # 1. Immediate key check
+    if not key or len(key) < 10 or key.startswith("sk-YOUR"):
+         return "⚠️ OpenAI API key is missing, too short, or is a placeholder. Please check Streamlit secrets."
 
-    client = OpenAI(api_key=key, timeout=30.0) # Set timeout to 30 seconds
+    client = OpenAI(api_key=key, timeout=30.0) # Set client timeout
     prompt = f"""
 You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
 Provide:
@@ -562,10 +561,27 @@ def main():
             st.session_state.prediction = prediction
             st.session_state.confidence = confidence
 
+        # --- NEW KEY STATUS CHECK (DEBUG) ---
+        key_status = st.secrets.get("OPENAI_API_KEY", "")
+        if not key_status or len(key_status) < 10 or key_status.startswith("sk-YOUR"):
+            st.error("🔑 OpenAI Key Status: Missing or Invalid. Check Streamlit Secrets UI.")
+            st.session_state.analysis_error = "OpenAI key issue. Cannot generate treatment."
+            st.rerun()
+            return
+        st.success("🔑 OpenAI Key Status: Key appears valid.")
+        # --- END DEBUG CHECK ---
+
+
         # 2. Treatment Generation
         with st.spinner(t("Generating AI-based treatment...")):
             treatment_en = generate_treatment_with_ai(prediction)
             
+            # Check if generation failed
+            if treatment_en.startswith("⚠️"):
+                st.session_state.analysis_error = treatment_en
+                st.rerun()
+                return
+
             # Translate treatment
             try:
                 translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
