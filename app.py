@@ -39,7 +39,7 @@ LANGUAGES = {
     "Bengali (বাংলা)": "bn",
     "Gujarati (ગુજરાતી)": "gu",
     "Punjabi (ਪੰਜਾਬੀ)": "pa",
-    "Marathi (मਰਾଠੀ)": "mr",
+    "Marathi (ਮਰਾਠੀ)": "mr",
     "Urdu (اردو)": "ur",
     "French (Français)": "fr",
     "German (Deutsch)": "de",
@@ -561,7 +561,7 @@ def main():
             
         # 3. Finalize Analysis (Set flag to true after all data is saved)
         st.session_state.analyzed = True
-        st.experimental_rerun() # Rerun to display persistent results
+        st.rerun() # Rerun to display persistent results
 
     # ----------------------------------------------------
     # PERSISTENT RESULTS DISPLAY
@@ -622,7 +622,7 @@ def main():
                     st.session_state.translated_risk = translated_risk
                     st.session_state.risk_analyzed = True
                     st.session_state.risk_audio_bytes = b"" # Reset risk audio
-                    st.experimental_rerun()
+                    st.rerun()
             
             # Display Weather and Risk Details (Reading from session state)
             info = st.session_state["weather_info"]
@@ -685,7 +685,7 @@ def main():
                                 st.session_state.leaf_img = leaf_img
                                 st.session_state.plant_img = plant_img
                                 st.session_state.visuals_generated = True
-                                st.experimental_rerun() # Rerun to show images
+                                st.rerun() # Rerun to show images
                             except Exception as e:
                                 st.error(f"AI visuals failed: {e}")
                                 clear_gpu()
