@@ -14,7 +14,7 @@ import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
 from openai import OpenAI
-from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
+from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline # LINE 17 FIX: Ensuring the explicit import path is correct
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
 
