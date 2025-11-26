@@ -14,7 +14,8 @@ import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
 from openai import OpenAI
-from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline # LINE 17 FIX: Ensuring the explicit import path is correct
+from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError # Explicitly import error types
+from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline 
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
 
@@ -71,14 +72,11 @@ def load_classifier(weight_path="best_plant_model.pth"):
     # NOTE: Assuming 240 classes based on previous logs/errors
     model.fc = nn.Linear(num_features, 240)
     if not os.path.exists(weight_path):
-        # Fallback for deployment environments that might not have the model file in the root
-        # This allows the app to load and show the UI, but prediction will fail.
         st.error(f"Classifier weight missing: {weight_path}. Prediction disabled.")
         st.session_state.analysis_error = f"Classifier model file '{weight_path}' not found in the repository."
         return None
     try:
         state = torch.load(weight_path, map_location=DEVICE)
-        # Assuming the state dictionary is the whole file, if not, adjust key:
         if isinstance(state, dict) and "model_state" in state:
             state = state["model_state"]
         elif isinstance(state, dict) and "state_dict" in state:
@@ -97,10 +95,7 @@ def load_classifier(weight_path="best_plant_model.pth"):
 @st.cache_data
 def get_class_names():
     # Placeholder/Dummy list - MUST be replaced with your actual 240 names
-    # This is currently the source of the 'class_175' problem.
     if "class_names" not in st.session_state or len(st.session_state.class_names) != 240:
-        # Check if the model has a class_to_idx attached (rare in this flow)
-        # Default to generic classes if the actual 240 names are unknown
         class_names = [f"Class_{i}" for i in range(240)]
         st.session_state.class_names = class_names
         return class_names
@@ -109,9 +104,6 @@ def get_class_names():
 
 # --------------------------
 # DEFERRED STABLE DIFFUSION LOADING FUNCTIONS
-# These functions are called only when the user clicks the "Generate Visuals" button.
-# They are not decorated with @st.cache_resource, but are called by the single cached 
-# entry point, ensuring the download happens only once per session/machine.
 # --------------------------
 def _load_text2img_pipe(model_id="runwayml/stable-diffusion-v1-5"):
     pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
@@ -242,11 +234,19 @@ Please keep sentences short and simple.
         )
         content = response.choices[0].message.content
         return content.strip()
+    except AuthenticationError:
+        return "⚠️ OpenAI API Authentication Failed. Check your key and billing status."
+    except RateLimitError:
+        return "⚠️ OpenAI Rate Limit Exceeded. You may need to upgrade your plan or wait."
+    except APIConnectionError:
+        return "⚠️ OpenAI Connection Error. Check firewall or network connectivity."
+    except APIError as e:
+        return f"⚠️ OpenAI API Error: {e.status_code} - {e.message}"
     except requests.exceptions.Timeout:
         return "⚠️ AI generation failed: Request timed out after 30 seconds. Try again later."
     except Exception as e:
-        # Catch other API errors (e.g., authentication failure, invalid model)
-        return f"⚠️ AI generation failed (API Error): {e}"
+        # Catch any other unexpected error
+        return f"⚠️ AI generation failed (Unexpected Error): {e}"
 
 # --------------------------
 # OpenWeather free helpers: geocode, current, forecast(3h)
