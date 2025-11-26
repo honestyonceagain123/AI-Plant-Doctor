@@ -39,8 +39,8 @@ LANGUAGES = {
     "Bengali (বাংলা)": "bn",
     "Gujarati (ગુજરાતી)": "gu",
     "Punjabi (ਪੰਜਾਬੀ)": "pa",
-    "Marathi (मराठी)": "mr",
-    "Urdu (اردੋ)": "ur",
+    "Marathi (मਰਾଠੀ)": "mr",
+    "Urdu (اردو)": "ur",
     "French (Français)": "fr",
     "German (Deutsch)": "de",
     "Spanish (Español)": "es",
@@ -105,35 +105,50 @@ def get_class_names():
     return st.session_state.class_names
 
 
-@st.cache_resource
-def load_text2img(model_id="runwayml/stable-diffusion-v1-5"):
-    try:
-        pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
-        if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing()
-        if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
-            try: pipe.enable_xformers_memory_efficient_attention()
-            except Exception: pass
-        if hasattr(pipe, "enable_vae_tiling"):
-            try: pipe.enable_vae_tiling()
-            except Exception: pass
-        return pipe
-    except Exception as e:
-        return f"AI Visuals Error: {e}"
+# --------------------------
+# DEFERRED STABLE DIFFUSION LOADING FUNCTIONS
+# These functions are called only when the user clicks the "Generate Visuals" button.
+# They are not decorated with @st.cache_resource, but are called by the single cached 
+# entry point, ensuring the download happens only once per session/machine.
+# --------------------------
+def _load_text2img_pipe(model_id="runwayml/stable-diffusion-v1-5"):
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
+    if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing()
+    if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
+        try: pipe.enable_xformers_memory_efficient_attention()
+        except Exception: pass
+    if hasattr(pipe, "enable_vae_tiling"):
+        try: pipe.enable_vae_tiling()
+        except Exception: pass
+    return pipe
+
+def _load_img2img_pipe(model_id="runwayml/stable-diffusion-v1-5"):
+    pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
+    if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing()
+    if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
+        try: pipe.enable_xformers_memory_efficient_attention()
+        except Exception: pass
+    if hasattr(pipe, "enable_vae_tiling"):
+        try: pipe.enable_vae_tiling()
+        except Exception: pass
+    return pipe
 
 @st.cache_resource
-def load_img2img(model_id="runwayml/stable-diffusion-v1-5"):
+def load_visuals_models(pipe_type: str):
+    """
+    Cached wrapper to ensure the massive models are only downloaded once per session/machine
+    when requested by the user's click.
+    """
     try:
-        pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
-        if hasattr(pipe, "enable_attention_slicing"): pipe.enable_attention_slicing()
-        if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
-            try: pipe.enable_xformers_memory_efficient_attention()
-            except Exception: pass
-        if hasattr(pipe, "enable_vae_tiling"):
-            try: pipe.enable_vae_tiling()
-            except Exception: pass
-        return pipe
+        if pipe_type == 'text2img':
+            return _load_text2img_pipe()
+        elif pipe_type == 'img2img':
+            return _load_img2img_pipe()
+        return None
     except Exception as e:
-        return f"AI Visuals Error: {e}"
+        st.session_state.visuals_error = f"AI Visuals Model Load Error: {e}"
+        return None
+
 
 # --------------------------
 # Helpers & TTS cleaning
@@ -357,8 +372,8 @@ def predict(image: Image.Image, model, class_names):
     return name, float(conf.item() * 100.0)
 
 def generate_healthy_leaf_img2img(base_pil_image: Image.Image, disease_label: str, strength=0.55, steps=25, guidance_scale=7.5):
-    pipe = load_img2img()
-    if isinstance(pipe, str): raise Exception(pipe) # Raise error if model failed to load
+    pipe = load_visuals_models('img2img')
+    if pipe is None: raise Exception(st.session_state.get('visuals_error', "Model pipeline failed."))
     
     species = extract_species(disease_label)
     prompt = (f"A realistic close-up photo of the same {species} leaf, perfectly healthy and vibrant green, same camera angle and lighting, photorealistic, no spots or lesions.")
@@ -369,8 +384,8 @@ def generate_healthy_leaf_img2img(base_pil_image: Image.Image, disease_label: st
     return out.images[0]
 
 def generate_healthy_product_text2img(disease_label: str, steps=30, guidance_scale=8.5):
-    pipe = load_text2img()
-    if isinstance(pipe, str): raise Exception(pipe) # Raise error if model failed to load
+    pipe = load_visuals_models('text2img')
+    if pipe is None: raise Exception(st.session_state.get('visuals_error', "Model pipeline failed."))
 
     species = extract_species(disease_label)
     prompt = (f"A high-quality realistic image of a healthy {species} plant with ripe fruits, vibrant colors, natural outdoor lighting, detailed leaves and fruits.")
@@ -395,6 +410,9 @@ def main():
     if 'uploaded_image' not in st.session_state: st.session_state.uploaded_image = None
     if 'treatment_audio_bytes' not in st.session_state: st.session_state.treatment_audio_bytes = b""
     if 'risk_audio_bytes' not in st.session_state: st.session_state.risk_audio_bytes = b""
+    if 'risk_analyzed' not in st.session_state: st.session_state.risk_analyzed = False
+    if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
+    if 'visuals_error' not in st.session_state: st.session_state.visuals_error = None
 
 
     # show GPU info once in sidebar
@@ -444,6 +462,8 @@ def main():
             st.session_state.weather_info = {
                 "city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast
             }
+            # Reset risk state when new weather data is fetched
+            st.session_state.risk_analyzed = False
             st.sidebar.success(f"Weather loaded for {resolved_name}")
 
     st.sidebar.button("Get Weather (Manual)", on_click=fetch_weather)
@@ -488,6 +508,9 @@ def main():
             image = Image.open(uploaded_file).convert("RGB")
             st.session_state.uploaded_image = image
             st.session_state.analyzed = False # Reset analysis flag if new image
+            st.session_state.visuals_generated = False # Reset visuals flag
+            st.session_state.leaf_img = None
+            st.session_state.plant_img = None
         except Exception as e:
             st.error(f"Error loading image: {e}")
             st.session_state.uploaded_image = None
@@ -507,6 +530,11 @@ def main():
     # ----------------------------------------------------
     if st.button(t("🔍 Analyze")):
         st.session_state.analyzed = False # Ensure we don't display old results if analysis fails
+        st.session_state.visuals_generated = False # Reset visuals
+        st.session_state.treatment_audio_bytes = b"" # Clear audio cache
+        st.session_state.risk_audio_bytes = b"" # Clear audio cache
+        st.session_state.leaf_img = None
+        st.session_state.plant_img = None
         
         # 1. Classification
         model = load_classifier()
@@ -531,24 +559,7 @@ def main():
             st.session_state.treatment_en = treatment_en
             st.session_state.translated_treatment = translated_treatment
             
-        # 3. AI Visuals Generation
-        st.session_state.leaf_img = None
-        st.session_state.plant_img = None
-
-        if "HUGGINGFACE_TOKEN" in st.secrets and st.secrets["HUGGINGFACE_TOKEN"]:
-            with st.spinner(t("Generating AI visuals... (This may be slow on CPU)") + "..."):
-                try:
-                    leaf_img = generate_healthy_leaf_img2img(image, prediction)
-                    plant_img = generate_healthy_product_text2img(prediction)
-                    st.session_state.leaf_img = leaf_img
-                    st.session_state.plant_img = plant_img
-                except Exception as e:
-                    st.warning(f"AI visuals failed (token/model issue): {e}")
-                    clear_gpu()
-        else:
-            st.warning(t("HUGGINGFACE_TOKEN missing from secrets. AI visuals skipped."))
-
-        # 4. Finalize Analysis (Set flag to true after all data is saved)
+        # 3. Finalize Analysis (Set flag to true after all data is saved)
         st.session_state.analyzed = True
         st.experimental_rerun() # Rerun to display persistent results
 
@@ -568,8 +579,10 @@ def main():
         st.write(st.session_state.translated_treatment)
         
         # Treatment TTS & Download Button
-        if not st.session_state.treatment_audio_bytes:
+        # We only generate audio if the state is empty (prevents regenerating on every click)
+        if not st.session_state.treatment_audio_bytes or st.session_state.get('last_tts_text') != st.session_state.translated_treatment:
              st.session_state.treatment_audio_bytes = generate_tts_bytes(st.session_state.translated_treatment, lang_code=target_lang_code)
+             st.session_state.last_tts_text = st.session_state.translated_treatment
              
         if st.session_state.treatment_audio_bytes and len(st.session_state.treatment_audio_bytes) > 10:
             st.audio(st.session_state.treatment_audio_bytes, format="audio/mp3")
@@ -592,8 +605,8 @@ def main():
         if not st.session_state.get("weather_info"):
             st.info(t("Set City in the sidebar and click 'Get Weather (Manual)' to fetch current weather and today's forecast (3-hour)."))
         else:
-            # Re-run risk analysis if weather was just updated
-            if 'last_weather_city' not in st.session_state or st.session_state.last_weather_city != st.session_state.weather_info['city']:
+            # Run risk analysis only if weather was just updated or if we haven't analyzed yet
+            if not st.session_state.risk_analyzed:
                 with st.spinner(t("Assessing weather-based disease risk...")):
                     info = st.session_state["weather_info"]
                     todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
@@ -607,9 +620,11 @@ def main():
                         translated_risk = raw_risk
                     
                     st.session_state.translated_risk = translated_risk
-                    st.session_state.last_weather_city = info['city']
-
-            # Display Weather and Risk Details
+                    st.session_state.risk_analyzed = True
+                    st.session_state.risk_audio_bytes = b"" # Reset risk audio
+                    st.experimental_rerun()
+            
+            # Display Weather and Risk Details (Reading from session state)
             info = st.session_state["weather_info"]
             cur = info.get("current")
             if cur:
@@ -651,28 +666,40 @@ def main():
 
 
         # ----------------------------------------------------
-        # OPTIONAL AI VISUALS
+        # OPTIONAL AI VISUALS (Moved behind a dedicated button)
         # ----------------------------------------------------
         st.markdown("---")
         st.header(t("Optional: AI visuals (healthy leaf & plant)"))
         
-        show_visuals = True
-        if DEVICE == "cpu":
-            st.warning(t("Note: Generating AI visuals on CPU is slow."))
-            # Checkbox persistence is handled by Streamlit's implicit session state
-            show_visuals = st.checkbox(t("Generate visuals anyway"))
-
-        if show_visuals:
-            if st.session_state.leaf_img and st.session_state.plant_img:
+        # New Button Logic for image generation
+        if st.session_state.prediction:
+            if not st.session_state.visuals_generated:
+                if st.button(t("🎨 Generate AI Visuals (Slow)")):
+                    if "HUGGINGFACE_TOKEN" not in st.secrets or not st.secrets["HUGGINGFACE_TOKEN"]:
+                        st.error(t("HUGGINGFACE_TOKEN missing from secrets. Cannot generate images."))
+                    else:
+                        with st.spinner(t("Generating AI visuals... (This may take several minutes on cloud CPU)") + "..."):
+                            try:
+                                leaf_img = generate_healthy_leaf_img2img(image, st.session_state.prediction)
+                                plant_img = generate_healthy_product_text2img(st.session_state.prediction)
+                                st.session_state.leaf_img = leaf_img
+                                st.session_state.plant_img = plant_img
+                                st.session_state.visuals_generated = True
+                                st.experimental_rerun() # Rerun to show images
+                            except Exception as e:
+                                st.error(f"AI visuals failed: {e}")
+                                clear_gpu()
+            
+            if st.session_state.visuals_generated:
                 c1, c2 = st.columns(2)
                 with c1:
                     st.subheader(t("Healthy Leaf (AI-Repaired)"))
                     st.image(st.session_state.leaf_img, use_column_width=True)
                 with c2:
                     st.subheader(t("Healthy Plant (AI)"))
-                    st.image(st.session_state.plant_img, use_column_width=True)
-            else:
-                st.info(t("AI visual generation skipped or failed during analysis."))
+                    st.image(st.session_state.plant_img, use_container_width=True) # Use container width for better look
+            elif not st.session_state.visuals_generated and st.session_state.analyzed:
+                st.info(t("Click the 'Generate AI Visuals' button above to create model images."))
 
 
     st.markdown("---")
