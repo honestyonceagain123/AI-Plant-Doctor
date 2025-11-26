@@ -219,14 +219,14 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
 # OpenAI treatment (English)
 # --------------------------
 def generate_treatment_with_ai(disease_name: str) -> str:
-    if "OPENAI_API_KEY" not in st.secrets:
-        return "⚠️ OPENAI_API_KEY missing from Streamlit secrets."
+    if "OPENAI_API_KEY" not in st.secrets or len(st.secrets.get("OPENAI_API_KEY", "")) < 10: # Added length check
+        return "⚠️ OPENAI_API_KEY missing or invalid in Streamlit secrets."
     
-    # Check if key is valid (sometimes key is present but invalid)
-    if not st.secrets["OPENAI_API_KEY"] or st.secrets["OPENAI_API_KEY"].startswith("sk-YOUR"):
+    key = st.secrets["OPENAI_API_KEY"]
+    if key.startswith("sk-YOUR"):
          return "⚠️ OPENAI_API_KEY is present but appears to be a placeholder or invalid."
 
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    client = OpenAI(api_key=key, timeout=30.0) # Set timeout to 30 seconds
     prompt = f"""
 You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
 Provide:
@@ -236,11 +236,18 @@ Provide:
 Please keep sentences short and simple.
 """
     try:
-        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"system","content":"You are an agricultural expert AI."},{"role":"user","content":prompt}],)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini", 
+            messages=[{"role":"system","content":"You are an agricultural expert AI."},{"role":"user","content":prompt}],
+            timeout=30.0 # Also set timeout on the request call
+        )
         content = response.choices[0].message.content
         return content.strip()
+    except requests.exceptions.Timeout:
+        return "⚠️ AI generation failed: Request timed out after 30 seconds. Try again later."
     except Exception as e:
-        return f"⚠️ AI generation failed: {e}"
+        # Catch other API errors (e.g., authentication failure, invalid model)
+        return f"⚠️ AI generation failed (API Error): {e}"
 
 # --------------------------
 # OpenWeather free helpers: geocode, current, forecast(3h)
@@ -315,7 +322,7 @@ def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", 
     # Try OpenAI if key present
     if openai_key and not openai_key.startswith("sk-YOUR"):
         try:
-            client = OpenAI(api_key=openai_key)
+            client = OpenAI(api_key=openai_key, timeout=30.0)
             prompt = f"""
 You are an agricultural expert. Given the short-term weather summary for {location_name} below, provide:
 1) Short risk assessment for common plant diseases (fungal, bacterial, viral, pests) — Low/Moderate/High + 1-line reason each.
@@ -324,8 +331,10 @@ Weather:
 {summary_text}
 Keep it short and simple.
 """
-            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}],)
+            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}], timeout=30.0)
             return response.choices[0].message.content.strip()
+        except requests.exceptions.Timeout:
+            return "⚠️ AI risk assessment timed out after 30 seconds (using heuristic fallback)."
         except Exception:
             pass # fall through to heuristic
 
@@ -355,7 +364,7 @@ Keep it short and simple.
         "Increase scouting for pests and use traps or biological controls when found."
     ]
 
-    return "Risk Summary:\n" + "\n".join(lines) + "\n\nRecommendations:\n" + "\n".join([f"- {r}" for r in recs])
+    return "Risk Summary (Heuristic Fallback):\n" + "\n".join(lines) + "\n\nRecommendations:\n" + "\n".join([f"- {r}" for r in recs])
 
 
 # --------------------------
