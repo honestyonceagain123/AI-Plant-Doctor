@@ -156,17 +156,14 @@ def clean_text_for_tts(text: str) -> str:
         text = str(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"`.+?`", " ", text)
-    text = re.sub(r"^[\-\*\+\>\#]+\s*", " ", text, flags=re.M)
+    text = re.sub(r"[\-\*\+\>\#]", "", text) # Simplified regex
     text = re.sub(r"http\S+", " ", text)
-    text = re.sub(r"(\/{2,}|\\{2,}|\*{1,}|\_{1,}|\={1,}|\|{1,}|\[{1,}|\]{1,})", " ", text)
-    text = re.sub(r"\.{2,}", ".", text)
     text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > 0 and text[-1] not in ".!?":
-        text = text + "."
     return text
 
 def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
     cleaned = clean_text_for_tts(text)
+    if not cleaned: return b""
     try:
         supported = gtts_langs.tts_langs()
     except Exception:
@@ -386,15 +383,10 @@ def main():
     if 'confidence' not in st.session_state: st.session_state.confidence = 0.0
     if 'treatment_en' not in st.session_state: st.session_state.treatment_en = ""
     if 'translated_treatment' not in st.session_state: st.session_state.translated_treatment = ""
-    if 'translated_risk' not in st.session_state: st.session_state.translated_risk = ""
     if 'leaf_img' not in st.session_state: st.session_state.leaf_img = None
     if 'plant_img' not in st.session_state: st.session_state.plant_img = None
     if 'uploaded_image' not in st.session_state: st.session_state.uploaded_image = None
-    if 'treatment_audio_bytes' not in st.session_state: st.session_state.treatment_audio_bytes = b""
-    if 'risk_audio_bytes' not in st.session_state: st.session_state.risk_audio_bytes = b""
-    if 'risk_analyzed' not in st.session_state: st.session_state.risk_analyzed = False
     if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
-    if 'visuals_error' not in st.session_state: st.session_state.visuals_error = None
     if 'analysis_error' not in st.session_state: st.session_state.analysis_error = ""
 
 
@@ -422,8 +414,8 @@ def main():
         if city == "":
             st.sidebar.error("Please enter a city name.")
             return
-        if "OPENWEATHER_KEY" not in st.secrets:
-            st.sidebar.error("OPENWEATHER_KEY missing from .streamlit/secrets.toml")
+        if "OPENWEATHER_KEY" not in st.secrets or not st.secrets["OPENWEATHER_KEY"]:
+            st.sidebar.error("OPENWEATHER_KEY missing from Streamlit secrets.")
             return
         
         api_key = st.secrets["OPENWEATHER_KEY"]
@@ -445,8 +437,6 @@ def main():
             st.session_state.weather_info = {
                 "city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast
             }
-            # Reset risk state when new weather data is fetched
-            st.session_state.risk_analyzed = False
             st.sidebar.success(f"Weather loaded for {resolved_name}")
 
     st.sidebar.button("Get Weather (Manual)", on_click=fetch_weather)
@@ -459,7 +449,7 @@ def main():
             tval = cur.get("main", {}).get("temp"); hum = cur.get("main", {}).get("humidity")
             desc = cur.get("weather", [{}])[0].get("description","").title()
             st.sidebar.markdown(f"**{info.get('city','')}**")
-            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
+            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
             st.sidebar.write(desc)
 
     # Main content
@@ -514,8 +504,6 @@ def main():
     if st.button(t("🔍 Analyze")):
         st.session_state.analyzed = False # Ensure we don't display old results if analysis fails
         st.session_state.visuals_generated = False # Reset visuals
-        st.session_state.treatment_audio_bytes = b"" # Clear audio cache
-        st.session_state.risk_audio_bytes = b"" # Clear audio cache
         st.session_state.leaf_img = None
         st.session_state.plant_img = None
         st.session_state.analysis_error = "" # Clear previous error
@@ -561,18 +549,23 @@ def main():
         st.success(f"🌿 {t('Prediction')}: {t(st.session_state.prediction)}")
         st.write(f"📊 {t('Model Confidence')}: {st.session_state.confidence:.2f}%")
 
-        # Display Treatment
+        # Display Treatment (Translated)
         with st.expander(t("AI-Generated Treatment (original)")):
             st.write(st.session_state.treatment_en)
 
         st.subheader(t("AI-Generated Treatment"))
+        # CRITICAL FIX: Display the translated treatment, not just the English one
         st.write(st.session_state.translated_treatment)
         
         # Treatment TTS & Download Button
-        # We only generate audio if the state is empty (prevents regenerating on every click)
-        if not st.session_state.treatment_audio_bytes or st.session_state.get('last_tts_text') != st.session_state.translated_treatment:
-             st.session_state.treatment_audio_bytes = generate_tts_bytes(st.session_state.translated_treatment, lang_code=target_lang_code)
-             st.session_state.last_tts_text = st.session_state.translated_treatment
+        # Generate audio from the translated text displayed above
+        tts_text = st.session_state.translated_treatment
+        
+        # Only regenerate if text changed
+        if 'last_tts_text' not in st.session_state or st.session_state.last_tts_text != tts_text:
+             with st.spinner(t("Generating speech for treatment...")):
+                st.session_state.treatment_audio_bytes = generate_tts_bytes(tts_text, lang_code=target_lang_code)
+                st.session_state.last_tts_text = tts_text
              
         if st.session_state.treatment_audio_bytes and len(st.session_state.treatment_audio_bytes) > 10:
             st.audio(st.session_state.treatment_audio_bytes, format="audio/mp3")
@@ -587,119 +580,50 @@ def main():
 
 
         # ----------------------------------------------------
-        # WEATHER AND RISK SECTION
-        # ----------------------------------------------------
-        st.markdown("---")
-        st.header(t("🌦️ Current Weather + Today's Forecast (3-hour slots)"))
-
-        if not st.session_state.get("weather_info"):
-            st.info(t("Set City in the sidebar and click 'Get Weather (Manual)' to fetch current weather and today's forecast (3-hour)."))
-        else:
-            # Run risk analysis only if weather was just updated or if we haven't analyzed yet
-            if not st.session_state.risk_analyzed:
-                with st.spinner(t("Assessing weather-based disease risk...")):
-                    info = st.session_state["weather_info"]
-                    todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
-                    
-                    openai_key = st.secrets.get("OPENAI_API_KEY")
-                    raw_risk = assess_weather_risk_with_ai(todays_items, info.get("city",""), openai_key)
-                    
-                    try:
-                        translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
-                    except Exception:
-                        translated_risk = raw_risk
-                    
-                    st.session_state.translated_risk = translated_risk
-                    st.session_state.risk_analyzed = True
-                    st.session_state.risk_audio_bytes = b"" # Reset risk audio
-                    st.rerun()
-            
-            # Display Weather and Risk Details (Reading from session state)
-            info = st.session_state["weather_info"]
-            cur = info.get("current")
-            if cur:
-                name = info.get("city", "")
-                temp = cur.get("main", {}).get("temp"); feels = cur.get("main", {}).get("feels_like")
-                humidity = cur.get("main", {}).get("humidity"); wind = cur.get("wind", {}).get("speed")
-                desc = cur.get("weather", [{}])[0].get("description","").title()
-                st.subheader(t(f"Current weather — {name}"))
-                st.write(t(f"🌡️ Temperature: {temp}°C (Feels like {feels}°C)"))
-                st.write(t(f"💧 Humidity: {humidity}%   ⚡ Wind: {wind} m/s"))
-                st.write(t(f"📘 Condition: {desc}"))
-
-            todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
-            if todays_items:
-                st.subheader(t("Today's short-term forecast"))
-                df_rows = [{"Time": it["time"].split(" ")[1][:5], "Temp (°C)": it.get("temp"), "Feels": it.get("feels_like"), "Humidity (%)": it.get("humidity"), "Condition": it.get("desc")} for it in todays_items]
-                st.table(df_rows[:6])
-            else:
-                st.info(t("No detailed 3-hour forecast available for today."))
-
-            # Display Weather Risk
-            st.subheader(t("Weather-based Disease Risk (today)"))
-            st.write(st.session_state.translated_risk)
-            
-            # Risk TTS & Download Button
-            if not st.session_state.risk_audio_bytes:
-                 st.session_state.risk_audio_bytes = generate_tts_bytes(st.session_state.translated_risk, lang_code=target_lang_code)
-
-            if st.session_state.risk_audio_bytes and len(st.session_state.risk_audio_bytes) > 10:
-                st.audio(st.session_state.risk_audio_bytes, format="audio/mp3")
-                st.download_button(
-                    label=t("⬇️ Download Risk MP3"), 
-                    data=st.session_state.risk_audio_bytes, 
-                    file_name="risk_analysis.mp3", 
-                    mime="audio/mpeg"
-                )
-            else:
-                st.error(t("TTS generation for risk failed."))
-
-
-        # ----------------------------------------------------
-        # OPTIONAL AI VISUALS
+        # OPTIONAL AI VISUALS (Moved behind a dedicated button)
         # ----------------------------------------------------
         st.markdown("---")
         st.header(t("Optional: AI visuals (healthy leaf & plant)"))
         
-        # NEW BUTTON FOR VISUALS
-        if not st.session_state.visuals_generated:
-            if st.button(t("🎨 Generate AI Visuals (Slow)")):
-                if "HUGGINGFACE_TOKEN" not in st.secrets:
-                    st.error(t("HUGGINGFACE_TOKEN missing from secrets. Cannot generate images."))
-                else:
-                    with st.spinner(t("Generating AI visuals... (This may take several minutes on cloud CPU)")):
-                        try:
-                            leaf_img = generate_healthy_leaf_img2img(image, st.session_state.prediction)
-                            plant_img = generate_healthy_product_text2img(st.session_state.prediction)
-                            st.session_state.leaf_img = leaf_img
-                            st.session_state.plant_img = plant_img
-                            st.session_state.visuals_generated = True
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"AI visuals failed: {e}")
-                            clear_gpu()
-
-        if st.session_state.visuals_generated:
-            if st.session_state.leaf_img and st.session_state.plant_img:
+        # New Button Logic for image generation
+        if st.session_state.prediction:
+            if not st.session_state.visuals_generated:
+                if st.button(t("🎨 Generate AI Visuals (Slow)")):
+                    if "HUGGINGFACE_TOKEN" not in st.secrets or not st.secrets["HUGGINGFACE_TOKEN"]:
+                        st.error(t("HUGGINGFACE_TOKEN missing from secrets. Cannot generate images."))
+                    else:
+                        with st.spinner(t("Generating AI visuals... (This may take several minutes on cloud CPU)") + "..."):
+                            try:
+                                leaf_img = generate_healthy_leaf_img2img(image, st.session_state.prediction)
+                                plant_img = generate_healthy_product_text2img(st.session_state.prediction)
+                                st.session_state.leaf_img = leaf_img
+                                st.session_state.plant_img = plant_img
+                                st.session_state.visuals_generated = True
+                                st.rerun() # Rerun to show images
+                            except Exception as e:
+                                st.error(f"AI visuals failed: {e}")
+                                clear_gpu()
+            
+            if st.session_state.visuals_generated:
                 c1, c2 = st.columns(2)
                 with c1:
                     st.subheader(t("Healthy Leaf (AI-Repaired)"))
                     st.image(st.session_state.leaf_img, width='stretch')
                 with c2:
                     st.subheader(t("Healthy Plant (AI)"))
-                    st.image(st.session_state.plant_img, width='stretch')
-            else:
-                st.info(t("AI visual generation skipped or failed during analysis."))
+                    st.image(st.session_state.plant_img, width='stretch') 
+            elif not st.session_state.visuals_generated and st.session_state.analyzed:
+                st.info(t("Click the 'Generate AI Visuals' button above to create model images."))
 
 
     st.markdown("---")
     st.caption(t("© 2025 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
 
-import streamlit as st
+# --------------------------
+# Floating Chat Widget (retained from original file)
+# --------------------------
 import streamlit.components.v1 as components
-
 chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
-
 floating_widget = f"""
 <style>
 #floatingChatContainer {{
