@@ -14,7 +14,7 @@ import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
 from openai import OpenAI
-# NOTE: Removed global diffusers import to prevent startup crashes.
+from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
 
@@ -70,24 +70,11 @@ def load_classifier(weight_path="best_plant_model.pth"):
     num_features = model.fc.in_features
     model.fc = nn.Linear(num_features, 240)
     if not os.path.exists(weight_path):
-        st.error(f"Classifier weight missing: {weight_path}. Prediction disabled.")
-        st.session_state.analysis_error = f"Classifier model file '{weight_path}' not found in the repository."
-        return None
-    try:
-        state = torch.load(weight_path, map_location=DEVICE)
-        if isinstance(state, dict) and "model_state" in state:
-            state = state["model_state"]
-        elif isinstance(state, dict) and "state_dict" in state:
-            state = state["state_dict"]
-            
-        model.load_state_dict(state)
-        model.to(DEVICE)
-        model.eval()
-    except Exception as e:
-        st.error(f"Error loading model weights: {e}")
-        st.session_state.analysis_error = f"Error loading model weights: {e}"
-        return None
-
+        raise FileNotFoundError(f"Classifier weight missing: {weight_path}")
+    state = torch.load(weight_path, map_location=DEVICE)
+    model.load_state_dict(state)
+    model.to(DEVICE)
+    model.eval()
     return model
 
 @st.cache_data
@@ -98,8 +85,6 @@ def get_class_names(train_dir="dataset/train"):
 
 @st.cache_resource
 def load_text2img(model_id="runwayml/stable-diffusion-v1-5"):
-    # Local import to fix ImportError on startup
-    from diffusers import StableDiffusionPipeline
     pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
     if hasattr(pipe, "enable_attention_slicing"):
         pipe.enable_attention_slicing()
@@ -117,8 +102,6 @@ def load_text2img(model_id="runwayml/stable-diffusion-v1-5"):
 
 @st.cache_resource
 def load_img2img(model_id="runwayml/stable-diffusion-v1-5"):
-    # Local import to fix ImportError on startup
-    from diffusers import StableDiffusionImg2ImgPipeline
     pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
     if hasattr(pipe, "enable_attention_slicing"):
         pipe.enable_attention_slicing()
@@ -156,14 +139,17 @@ def clean_text_for_tts(text: str) -> str:
         text = str(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"`.+?`", " ", text)
-    text = re.sub(r"[\-\*\+\>\#]", "", text) # Simplified regex
+    text = re.sub(r"^[\-\*\+\>\#]+\s*", " ", text, flags=re.M)
     text = re.sub(r"http\S+", " ", text)
+    text = re.sub(r"(\/{2,}|\\{2,}|\*{1,}|\_{1,}|\={1,}|\|{1,}|\[{1,}|\]{1,})", " ", text)
+    text = re.sub(r"\.{2,}", ".", text)
     text = re.sub(r"\s+", " ", text).strip()
+    if len(text) > 0 and text[-1] not in ".!?":
+        text = text + "."
     return text
 
 def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
     cleaned = clean_text_for_tts(text)
-    if not cleaned: return b""
     try:
         supported = gtts_langs.tts_langs()
     except Exception:
@@ -343,7 +329,6 @@ Keep it short and simple.
 # Prediction & SD helpers
 # --------------------------
 def predict(image: Image.Image, model, class_names):
-    if model is None: return "Classifier Model Unavailable", 0.0
     transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
     img_tensor = transform(image).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
@@ -377,19 +362,6 @@ def generate_healthy_product_text2img(disease_label: str, steps=30, guidance_sca
 # Main UI (sidebar moved inside main; chatbot removed)
 # --------------------------
 def main():
-    # --- SESSION STATE INITIALIZATION ---
-    if 'analyzed' not in st.session_state: st.session_state.analyzed = False
-    if 'prediction' not in st.session_state: st.session_state.prediction = ""
-    if 'confidence' not in st.session_state: st.session_state.confidence = 0.0
-    if 'treatment_en' not in st.session_state: st.session_state.treatment_en = ""
-    if 'translated_treatment' not in st.session_state: st.session_state.translated_treatment = ""
-    if 'leaf_img' not in st.session_state: st.session_state.leaf_img = None
-    if 'plant_img' not in st.session_state: st.session_state.plant_img = None
-    if 'uploaded_image' not in st.session_state: st.session_state.uploaded_image = None
-    if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
-    if 'analysis_error' not in st.session_state: st.session_state.analysis_error = ""
-
-
     # show GPU info once in sidebar
     show_device_info()
 
@@ -401,45 +373,39 @@ def main():
 
     st.sidebar.header("🌦️ Weather (Manual city — India)")
     st.sidebar.write("Country: **India 🇮🇳** (fixed)")
-    
-    # ----------------------------------------------------
-    # Weather Input Logic
-    # ----------------------------------------------------
-    city_input = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city, key="city_input_key")
+    st.session_state.manual_city = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city)
 
-    def fetch_weather():
-        city = city_input.strip()
-        st.session_state.manual_city = city # Update session state for persistence
-
+    if st.sidebar.button("Get Weather (Manual)"):
+        city = st.session_state.manual_city.strip()
         if city == "":
             st.sidebar.error("Please enter a city name.")
-            return
-        if "OPENWEATHER_KEY" not in st.secrets or not st.secrets["OPENWEATHER_KEY"]:
-            st.sidebar.error("OPENWEATHER_KEY missing from Streamlit secrets.")
-            return
-        
-        api_key = st.secrets["OPENWEATHER_KEY"]
-
-        with st.spinner("Fetching weather data..."):
-            coords = geocode_city_to_coords(city, api_key)
+        elif "OPENWEATHER_KEY" not in st.secrets:
+            st.sidebar.error("OPENWEATHER_KEY missing from .streamlit/secrets.toml")
+        else:
+            # Try geocoding to get canonical name (optional)
+            coords = geocode_city_to_coords(city, st.secrets["OPENWEATHER_KEY"])
             if not coords:
-                st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling.")
-                return
-
-            lat, lon, resolved_name = coords
-            current = get_current_weather(resolved_name, api_key)
-            forecast = get_forecast_3h(resolved_name, api_key)
-
-            if not current:
-                st.sidebar.error("Failed to fetch current weather.")
-                return
-
-            st.session_state.weather_info = {
-                "city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast
-            }
-            st.sidebar.success(f"Weather loaded for {resolved_name}")
-
-    st.sidebar.button("Get Weather (Manual)", on_click=fetch_weather)
+                cur = get_current_weather(city, st.secrets["OPENWEATHER_KEY"])
+                if not cur or cur.get("cod") == 401:
+                    # 401 indicates invalid API key
+                    if cur and cur.get("cod") == 401:
+                        st.sidebar.error("OpenWeather API returned 401: Invalid API key. Check your OPENWEATHER_KEY in secrets.")
+                    else:
+                        st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling (e.g., Mumbai, Delhi).")
+                else:
+                    name = cur.get("name", city)
+                    forecast = get_forecast_3h(name, st.secrets["OPENWEATHER_KEY"])
+                    st.session_state.weather_info = {"city": name, "lat": None, "lon": None, "current": cur, "forecast3h": forecast}
+                    st.sidebar.success(f"Weather loaded for {name}")
+            else:
+                lat, lon, resolved_name = coords
+                current = get_current_weather(resolved_name, st.secrets["OPENWEATHER_KEY"])
+                forecast = get_forecast_3h(resolved_name, st.secrets["OPENWEATHER_KEY"])
+                if not current:
+                    st.sidebar.error("Failed to fetch current weather for resolved city.")
+                else:
+                    st.session_state.weather_info = {"city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast}
+                    st.sidebar.success(f"Weather loaded for {resolved_name}")
 
     # Sidebar quick summary
     if st.session_state.get("weather_info"):
@@ -449,17 +415,14 @@ def main():
             tval = cur.get("main", {}).get("temp"); hum = cur.get("main", {}).get("humidity")
             desc = cur.get("weather", [{}])[0].get("description","").title()
             st.sidebar.markdown(f"**{info.get('city','')}**")
-            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
+            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
             st.sidebar.write(desc)
 
     # Main content
     # language selection (UI & TTS)
-    if "ui_lang_code" not in st.session_state: st.session_state.ui_lang_code = "en"
-    
-    selected_label = st.sidebar.selectbox("🌐 Translate & TTS language", 
-                                        list(LANGUAGES.keys()), 
-                                        index=list(LANGUAGES.keys()).index("English"))
-    
+    if "ui_lang_code" not in st.session_state:
+        st.session_state.ui_lang_code = "en"
+    selected_label = st.sidebar.selectbox("🌐 Translate & TTS language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
     target_lang_code = LANGUAGES.get(selected_label, "en")
     st.session_state.ui_lang_code = target_lang_code
     translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
@@ -474,165 +437,162 @@ def main():
     st.markdown(t("Upload a leaf photo to diagnose the disease and get AI treatment plus today's weather-aware risk."))
 
     uploaded_file = st.file_uploader(t("📤 Upload a leaf image"), type=["jpg", "jpeg", "png"])
-    
-    # Store uploaded file persistently only if a new one is uploaded
-    if uploaded_file:
-        try:
-            image = Image.open(uploaded_file).convert("RGB")
-            st.session_state.uploaded_image = image
-            st.session_state.analyzed = False # Reset analysis flag if new image
-            st.session_state.visuals_generated = False # Reset visuals flag
-            st.session_state.leaf_img = None
-            st.session_state.plant_img = None
-        except Exception as e:
-            st.error(f"Error loading image: {e}")
-            st.session_state.uploaded_image = None
-            return
-    elif st.session_state.uploaded_image:
-        image = st.session_state.uploaded_image
-    else:
+    if not uploaded_file:
         st.caption(t("Tip: Use a clear close-up of the leaf."))
         return
 
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption=t("Uploaded Image"), use_container_width=True)
 
-    # Display the image persistently
-    st.image(image, caption=t("Uploaded Image"), width='stretch')
-
-    # ----------------------------------------------------
-    # ANALYSIS BUTTON LOGIC
-    # ----------------------------------------------------
     if st.button(t("🔍 Analyze")):
-        st.session_state.analyzed = False # Ensure we don't display old results if analysis fails
-        st.session_state.visuals_generated = False # Reset visuals
-        st.session_state.leaf_img = None
-        st.session_state.plant_img = None
-        st.session_state.analysis_error = "" # Clear previous error
-        
-        # 1. Classification
-        model = load_classifier()
-        if model is None: 
-            # The error message was already set in load_classifier via st.session_state.analysis_error
-            st.rerun() 
+        # classifier
+        try:
+            model = load_classifier()
+        except FileNotFoundError as e:
+            st.error(str(e))
             return
 
         class_names = get_class_names()
         with st.spinner(t("Running classifier...")):
-            prediction, confidence = predict(image, model, class_names)
-            st.session_state.prediction = prediction
-            st.session_state.confidence = confidence
+            try:
+                prediction, confidence = predict(image, model, class_names)
+            except Exception as e:
+                st.error(f"Classifier failed: {e}")
+                return
 
-        # 2. Treatment Generation
+        st.success(f"🌿 {t('Prediction')}: {t(prediction)}")
+        st.write(f"📊 {t('Model Confidence')}: {confidence:.2f}%")
+
+        # save diagnosis briefly in session (available if user wants to copy into external chatbot)
+        st.session_state.last_diagnosis = prediction
+
+        # treatment
         with st.spinner(t("Generating AI-based treatment...")):
             treatment_en = generate_treatment_with_ai(prediction)
-            
-            # Translate treatment
-            try:
-                translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
-            except Exception:
-                translated_treatment = treatment_en
-            
-            st.session_state.treatment_en = treatment_en
-            st.session_state.translated_treatment = translated_treatment
-            
-        # 3. Finalize Analysis (Set flag to true after all data is saved)
-        st.session_state.analyzed = True
-        st.rerun() # Rerun to display persistent results
 
-    # ----------------------------------------------------
-    # PERSISTENT RESULTS DISPLAY
-    # ----------------------------------------------------
-    if st.session_state.analysis_error:
-        st.error(st.session_state.analysis_error)
-    
-    if st.session_state.analyzed:
-        # Display Prediction
-        st.success(f"🌿 {t('Prediction')}: {t(st.session_state.prediction)}")
-        st.write(f"📊 {t('Model Confidence')}: {st.session_state.confidence:.2f}%")
+        try:
+            translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
+        except Exception:
+            translated_treatment = treatment_en
 
-        # Display Treatment (Translated)
+        st.session_state.last_treatment = treatment_en
+
         with st.expander(t("AI-Generated Treatment (original)")):
-            st.write(st.session_state.treatment_en)
+            st.write(treatment_en)
 
         st.subheader(t("AI-Generated Treatment"))
-        # CRITICAL FIX: Display the translated treatment, not just the English one
-        st.write(st.session_state.translated_treatment)
-        
-        # Treatment TTS & Download Button
-        # Generate audio from the translated text displayed above
-        tts_text = st.session_state.translated_treatment
-        
-        # Only regenerate if text changed
-        if 'last_tts_text' not in st.session_state or st.session_state.last_tts_text != tts_text:
-             with st.spinner(t("Generating speech for treatment...")):
-                st.session_state.treatment_audio_bytes = generate_tts_bytes(tts_text, lang_code=target_lang_code)
-                st.session_state.last_tts_text = tts_text
-             
-        if st.session_state.treatment_audio_bytes and len(st.session_state.treatment_audio_bytes) > 10:
-            st.audio(st.session_state.treatment_audio_bytes, format="audio/mp3")
-            st.download_button(
-                label=t("⬇️ Download Treatment MP3"), 
-                data=st.session_state.treatment_audio_bytes, 
-                file_name="treatment.mp3", 
-                mime="audio/mpeg"
-            )
+        st.write(translated_treatment)
+
+        # treatment TTS
+        with st.spinner(t("Generating speech for treatment...")):
+            treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
+        if treatment_audio and len(treatment_audio) > 10:
+            st.audio(treatment_audio, format="audio/mp3")
+            st.download_button(label=t("⬇️ Download Treatment MP3"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
         else:
             st.error(t("TTS generation for treatment failed."))
 
+        # Weather & today's forecast (Option B — 3h forecast only)
+        st.markdown("---")
+        st.header(t("🌦️ Current Weather + Today's Forecast (3-hour slots)"))
 
-        # ----------------------------------------------------
-        # OPTIONAL AI VISUALS (Moved behind a dedicated button)
-        # ----------------------------------------------------
+        if not st.session_state.get("weather_info"):
+            st.info(t("Set City in the sidebar and click 'Get Weather (Manual)' to fetch current weather and today's forecast (3-hour)."))
+        else:
+            info = st.session_state["weather_info"]
+            cur = info.get("current")
+            forecast3h = info.get("forecast3h")
+            if cur:
+                name = info.get("city", "")
+                temp = cur.get("main", {}).get("temp")
+                feels = cur.get("main", {}).get("feels_like")
+                humidity = cur.get("main", {}).get("humidity")
+                wind = cur.get("wind", {}).get("speed")
+                desc = cur.get("weather", [{}])[0].get("description","").title()
+                st.subheader(t(f"Current weather — {name}"))
+                st.write(t(f"🌡️ Temperature: {temp}°C (Feels like {feels}°C)"))
+                st.write(t(f"💧 Humidity: {humidity}%  ⚡ Wind: {wind} m/s"))
+                st.write(t(f"📘 Condition: {desc}"))
+
+            todays_items = get_todays_forecast_from_3h(forecast3h) if forecast3h else []
+            if todays_items:
+                st.subheader(t("Today's short-term forecast"))
+                df_rows = []
+                for it in todays_items:
+                    df_rows.append({
+                        "Time": it["time"].split(" ")[1][:5],
+                        "Temp (°C)": it.get("temp"),
+                        "Feels": it.get("feels_like"),
+                        "Humidity (%)": it.get("humidity"),
+                        "Condition": it.get("desc")
+                    })
+                st.table(df_rows[:6])
+            else:
+                st.info(t("No detailed 3-hour forecast available for today."))
+
+            # Risk assessment based on today's 3h forecast
+            with st.spinner(t("Assessing weather-based disease risk...")):
+                openai_key = st.secrets.get("OPENAI_API_KEY")
+                raw_risk = assess_weather_risk_with_ai(todays_items if todays_items else [{"desc": desc, "temp": temp, "humidity": humidity, "time": time.strftime("%Y-%m-%d %H:%M:%S")}], info.get("city",""), openai_key)
+
+            try:
+                translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
+            except Exception:
+                translated_risk = raw_risk
+
+            st.subheader(t("Weather-based Disease Risk (today)"))
+            st.write(translated_risk)
+
+            # TTS the risk
+            with st.spinner(t("Generating speech for risk analysis...")):
+                risk_audio = generate_tts_bytes(translated_risk, lang_code=target_lang_code)
+            if risk_audio and len(risk_audio) > 10:
+                st.audio(risk_audio, format="audio/mp3")
+                st.download_button(label=t("⬇️ Download Risk MP3"), data=risk_audio, file_name="risk_analysis.mp3", mime="audio/mpeg")
+            else:
+                st.error(t("TTS generation for risk failed."))
+
+        # Optional visuals
         st.markdown("---")
         st.header(t("Optional: AI visuals (healthy leaf & plant)"))
-        
-        # New Button Logic for image generation
-        if st.session_state.prediction:
-            if not st.session_state.visuals_generated:
-                if st.button(t("🎨 Generate AI Visuals (Slow)")):
-                    if "HUGGINGFACE_TOKEN" not in st.secrets or not st.secrets["HUGGINGFACE_TOKEN"]:
-                        st.error(t("HUGGINGFACE_TOKEN missing from secrets. Cannot generate images."))
-                    else:
-                        with st.spinner(t("Generating AI visuals... (This may take several minutes on cloud CPU)") + "..."):
-                            try:
-                                leaf_img = generate_healthy_leaf_img2img(image, st.session_state.prediction)
-                                plant_img = generate_healthy_product_text2img(st.session_state.prediction)
-                                st.session_state.leaf_img = leaf_img
-                                st.session_state.plant_img = plant_img
-                                st.session_state.visuals_generated = True
-                                st.rerun() # Rerun to show images
-                            except Exception as e:
-                                st.error(f"AI visuals failed: {e}")
-                                clear_gpu()
-            
-            if st.session_state.visuals_generated:
+        if DEVICE == "cpu":
+            st.warning(t("Note: Generating AI visuals on CPU is slow."))
+            if not st.checkbox(t("Generate visuals anyway")):
+                return
+
+        with st.spinner(t("Generating AI visuals...")):
+            try:
+                leaf_img = generate_healthy_leaf_img2img(image, prediction)
+                plant_img = generate_healthy_product_text2img(prediction)
                 c1, c2 = st.columns(2)
                 with c1:
                     st.subheader(t("Healthy Leaf (AI-Repaired)"))
-                    st.image(st.session_state.leaf_img, width='stretch')
+                    st.image(leaf_img, use_column_width=True)
                 with c2:
                     st.subheader(t("Healthy Plant (AI)"))
-                    st.image(st.session_state.plant_img, width='stretch') 
-            elif not st.session_state.visuals_generated and st.session_state.analyzed:
-                st.info(t("Click the 'Generate AI Visuals' button above to create model images."))
-
+                    st.image(plant_img, use_column_width=True)
+            except Exception as e:
+                st.error(f"AI visuals failed: {e}")
+                clear_gpu()
 
     st.markdown("---")
     st.caption(t("© 2025 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
 
-# --------------------------
-# Floating Chat Widget (retained from original file)
-# --------------------------
+import streamlit as st
 import streamlit.components.v1 as components
+
 chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
+
 floating_widget = f"""
 <style>
 #floatingChatContainer {{
     position: fixed;
     bottom: 0;
     right: 0;
-    z-index: 999999999;
-    pointer-events: none;
+    z-index: 999999999; /* Always on top */
+    pointer-events: none; /* Prevent Streamlit capturing clicks */
 }}
+
 #chatButton {{
     width: 65px;
     height: 65px;
@@ -644,8 +604,9 @@ floating_widget = f"""
     cursor: pointer;
     margin: 20px;
     box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
-    pointer-events: auto;
+    pointer-events: auto; /* Button clickable */
 }}
+
 #chatFrame {{
     width: 360px;
     height: 480px;
@@ -655,7 +616,7 @@ floating_widget = f"""
     margin-right: 20px;
     margin-bottom: 95px;
     box-shadow: 0 0 20px rgba(0,0,0,0.4);
-    pointer-events: auto;
+    pointer-events: auto; /* Frame clickable */
 }}
 </style>
 
@@ -673,7 +634,10 @@ btn.onclick = function() {{
 }};
 </script>
 """
+
+# IMPORTANT: height=0 stops Streamlit from pushing layout down
 components.html(floating_widget, height=0, width=0)
+
 
 
 if __name__ == "__main__":
