@@ -14,18 +14,10 @@ import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
 from openai import OpenAI
-from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError # Explicitly import error types
-# Removed: from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline 
+# NOTE: Removed global diffusers import to prevent startup crashes. 
+# They are now imported dynamically inside the generation functions.
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
-import base64 # Required for API calls
-import json   # Required for API calls
-
-# --- API CONFIGURATION ---
-# IMPORTANT: This URL points to your running Colab GPU instance. 
-# It will expire when the Colab session ends, and must be updated if it changes.
-COLAB_API_ENDPOINT = "https://rxxxxxxxxxxxxxxl-nxxxxxxxxxsferable.ngrok-free.dev" 
-# -------------------------
 
 # --------------------------
 # Page config + device
@@ -48,7 +40,7 @@ LANGUAGES = {
     "Bengali (বাংলা)": "bn",
     "Gujarati (ગુજરાતી)": "gu",
     "Punjabi (ਪੰਜਾਬੀ)": "pa",
-    "Marathi (ਮਰਾਠੀ)": "mr",
+    "Marathi (मराठी)": "mr",
     "Urdu (اردو)": "ur",
     "French (Français)": "fr",
     "German (Deutsch)": "de",
@@ -77,11 +69,10 @@ def show_device_info():
 def load_classifier(weight_path="best_plant_model.pth"):
     model = models.resnet50(weights=None)
     num_features = model.fc.in_features
-    # NOTE: Assuming 240 classes based on previous logs/errors
     model.fc = nn.Linear(num_features, 240)
     if not os.path.exists(weight_path):
         st.error(f"Classifier weight missing: {weight_path}. Prediction disabled.")
-        st.session_state.analysis_error = f"Classifier model file '{weight_path}' not found in the repository."
+        st.session_state.analysis_error = f"Classifier model file '{weight_path}' not found."
         return None
     try:
         state = torch.load(weight_path, map_location=DEVICE)
@@ -95,32 +86,37 @@ def load_classifier(weight_path="best_plant_model.pth"):
         model.eval()
     except Exception as e:
         st.error(f"Error loading model weights: {e}")
-        st.session_state.analysis_error = f"Error loading model weights: {e}"
         return None
-
     return model
 
 @st.cache_data
-def get_class_names():
-    # Placeholder/Dummy list - MUST be replaced with your actual 240 names
-    if "class_names" not in st.session_state or len(st.session_state.class_names) != 240:
-        class_names = [f"Class_{i}" for i in range(240)]
-        st.session_state.class_names = class_names
-        return class_names
-    return st.session_state.class_names
-
+def get_class_names(train_dir="dataset/train"):
+    # Fallback to generic names if directory missing (common in cloud deployment)
+    if not os.path.isdir(train_dir):
+        if "class_names" not in st.session_state:
+             st.session_state.class_names = [f"Class_{i}" for i in range(240)]
+        return st.session_state.class_names
+    return sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
 
 # --------------------------
-# DEFERRED STABLE DIFFUSION LOADING FUNCTIONS (Placeholder/API)
+# DEFERRED LOADING (Visuals)
 # --------------------------
-@st.cache_resource
-def load_visuals_models(pipe_type: str):
-    # This function is now a placeholder and always returns True if the endpoint is set.
-    # The actual heavy loading happens in the Colab backend.
-    if COLAB_API_ENDPOINT == "YOUR_COLAB_API_ENDPOINT" or not COLAB_API_ENDPOINT:
-        st.session_state.visuals_error = "API Endpoint missing. Update COLAB_API_ENDPOINT in app.py."
-        return None
-    return True # Placeholder for a successful "load"
+# No @st.cache_resource here! We load fresh or handle caching manually to avoid startup hangs.
+def load_text2img(model_id="runwayml/stable-diffusion-v1-5"):
+    # Dynamic import prevents ImportError on startup
+    from diffusers import StableDiffusionPipeline
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
+    if hasattr(pipe, "enable_attention_slicing"):
+        pipe.enable_attention_slicing()
+    return pipe
+
+def load_img2img(model_id="runwayml/stable-diffusion-v1-5"):
+    # Dynamic import prevents ImportError on startup
+    from diffusers import StableDiffusionImg2ImgPipeline
+    pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
+    if hasattr(pipe, "enable_attention_slicing"):
+        pipe.enable_attention_slicing()
+    return pipe
 
 # --------------------------
 # Helpers & TTS cleaning
@@ -134,8 +130,6 @@ def clear_gpu():
     if DEVICE == "cuda":
         try:
             torch.cuda.empty_cache()
-            if hasattr(torch.cuda, "ipc_collect"):
-                torch.cuda.ipc_collect()
         except Exception:
             pass
 
@@ -144,30 +138,23 @@ def clean_text_for_tts(text: str) -> str:
         text = str(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"`.+?`", " ", text)
-    text = re.sub(r"^[\-\*\+\>\#]+\s*", " ", text, flags=re.M)
+    text = re.sub(r"[\-\*\+\>\#]", "", text) # Simplified regex
     text = re.sub(r"http\S+", " ", text)
-    text = re.sub(r"(\/{2,}|\\{2,}|\*{1,}|\_{1,}|\={1,}|\|{1,}|\[{1,}|\]{1,})", " ", text)
-    text = re.sub(r"\.{2,}", ".", text)
     text = re.sub(r"\s+", " ", text).strip()
-    if len(text) > 0 and text[-1] not in ".!?":
-        text = text + "."
     return text
 
 def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
     cleaned = clean_text_for_tts(text)
     if not cleaned: return b""
     try:
-        # Check for language support
         supported = gtts_langs.tts_langs()
     except Exception:
         supported = {"en":"English"}
-        
-    if lang_code not in supported:
-        # Fallback for unsupported codes
-        if lang_code.startswith("zh"): lang_code = "zh-cn"
-        elif lang_code == "pa": lang_code = "hi"
-        else: lang_code = "en"
     
+    if lang_code not in supported:
+        if lang_code == "pa": lang_code = "hi" # Fallback for Punjabi -> Hindi
+        else: lang_code = "en"
+        
     audio_buf = io.BytesIO()
     try:
         tts = gTTS(text=cleaned, lang=lang_code)
@@ -175,27 +162,16 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
         audio_buf.seek(0)
         return audio_buf.read()
     except Exception:
-        # Fallback to English if target language fails
-        try:
-            tts = gTTS(text=cleaned, lang="en")
-            audio_buf = io.BytesIO()
-            tts.write_to_fp(audio_buf)
-            audio_buf.seek(0)
-            return audio_buf.read()
-        except Exception:
-            return b""
+        return b""
 
 # --------------------------
 # OpenAI treatment (English)
 # --------------------------
 def generate_treatment_with_ai(disease_name: str) -> str:
-    key = st.secrets.get("OPENAI_API_KEY", "")
+    if "OPENAI_API_KEY" not in st.secrets:
+        return "⚠️ OPENAI_API_KEY missing from Streamlit secrets."
     
-    # 1. Immediate key check
-    if not key or len(key) < 10 or key.startswith("sk-YOUR"):
-         return "⚠️ OpenAI API key is missing, too short, or is a placeholder. Please check Streamlit secrets."
-
-    client = OpenAI(api_key=key, timeout=30.0) # Set client timeout
+    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
     prompt = f"""
 You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
 Provide:
@@ -205,29 +181,17 @@ Provide:
 Please keep sentences short and simple.
 """
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini", 
-            messages=[{"role":"system","content":"You are an agricultural expert AI."},{"role":"user","content":prompt}],
-            timeout=30.0 # Also set timeout on the request call
-        )
-        content = response.choices[0].message.content
+        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"system","content":"You are an agricultural expert AI."},{"role":"user","content":prompt}],)
+        if hasattr(response, "choices"):
+            content = response.choices[0].message.content
+        else:
+            content = getattr(response, "text", str(response))
         return content.strip()
-    except AuthenticationError:
-        return "⚠️ OpenAI API Authentication Failed. Check your key and billing status."
-    except RateLimitError:
-        return "⚠️ OpenAI Rate Limit Exceeded. You may need to upgrade your plan or wait."
-    except APIConnectionError:
-        return "⚠️ OpenAI Connection Error. Check firewall or network connectivity."
-    except APIError as e:
-        return f"⚠️ OpenAI API Error: {e.status_code} - {e.message}"
-    except requests.exceptions.Timeout:
-        return "⚠️ AI generation failed: Request timed out after 30 seconds. Try again later."
     except Exception as e:
-        # Catch any other unexpected error
-        return f"⚠️ AI generation failed (Unexpected Error): {e}"
+        return f"⚠️ AI generation failed: {e}"
 
 # --------------------------
-# OpenWeather free helpers: geocode, current, forecast(3h)
+# OpenWeather free helpers
 # --------------------------
 def geocode_city_to_coords(city: str, api_key: str):
     try:
@@ -237,11 +201,9 @@ def geocode_city_to_coords(city: str, api_key: str):
         r = requests.get(url, params=params, timeout=12)
         r.raise_for_status()
         data = r.json()
-        if not data:
-            return None
+        if not data: return None
         return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("name", city)
-    except Exception:
-        return None
+    except Exception: return None
 
 def get_current_weather(city: str, api_key: str):
     try:
@@ -250,30 +212,24 @@ def get_current_weather(city: str, api_key: str):
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
         return r.json()
-    except Exception:
-        return None
+    except Exception: return None
 
 def get_forecast_3h(city: str, api_key: str):
-    """5-day / 3-hour forecast (free). We'll extract today's entries."""
     try:
         url = "https://api.openweathermap.org/data/2.5/forecast"
         params = {"q": f"{city},IN", "units": "metric", "appid": api_key}
         r = requests.get(url, params=params, timeout=10)
         r.raise_for_status()
         return r.json()
-    except Exception:
-        return None
+    except Exception: return None
 
 def get_todays_forecast_from_3h(forecast_json):
-    """Return list of forecast items (dicts) from forecast_json that belong to today (local date)."""
-    if not forecast_json or "list" not in forecast_json:
-        return []
+    if not forecast_json or "list" not in forecast_json: return []
     today = time.strftime("%Y-%m-%d", time.localtime())
     items = []
     for item in forecast_json["list"]:
-        dt_txt = item.get("dt_txt", "")  # format "YYYY-MM-DD HH:MM:SS"
+        dt_txt = item.get("dt_txt", "")
         if dt_txt.startswith(today):
-            # keep relevant fields
             items.append({
                 "time": dt_txt,
                 "temp": item.get("main", {}).get("temp"),
@@ -284,68 +240,30 @@ def get_todays_forecast_from_3h(forecast_json):
     return items
 
 def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", openai_key: str = None):
-    # daily_forecasts is a list of dicts with keys like 'time'/'temp'/'humidity'/'description'
     summary_lines = []
     for d in daily_forecasts:
         desc = d.get("description") or d.get("desc", "") or ""
         temp = d.get("temp", d.get("temp_day", None))
         humidity = d.get("humidity", None)
         summary_lines.append(f"{d.get('time', d.get('date',''))}: {desc}, temp {temp}°C, humidity {humidity}%")
-    summary_text = "\n".join(summary_lines[:12])  # use up to several slots for context
+    summary_text = "\n".join(summary_lines[:12])
 
-    # Try OpenAI if key present
-    if openai_key and not openai_key.startswith("sk-YOUR"):
+    if openai_key:
         try:
-            client = OpenAI(api_key=openai_key, timeout=30.0)
-            prompt = f"""
-You are an agricultural expert. Given the short-term weather summary for {location_name} below, provide:
-1) Short risk assessment for common plant diseases (fungal, bacterial, viral, pests) — Low/Moderate/High + 1-line reason each.
-2) 3 quick recommendations farmers can do today or this week.
-Weather:
-{summary_text}
-Keep it short and simple.
-"""
-            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}], timeout=30.0)
-            return response.choices[0].message.content.strip()
-        except requests.exceptions.Timeout:
-            return "⚠️ AI risk assessment timed out after 30 seconds (using heuristic fallback)."
-        except Exception:
-            pass # fall through to heuristic
+            client = OpenAI(api_key=openai_key)
+            prompt = f"Given this weather for {location_name}:\n{summary_text}\nProvide short risk assessment (Fungal/Pest) and 3 quick tips for farmers."
+            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}],)
+            if hasattr(response, "choices"): return response.choices[0].message.content.strip()
+        except Exception: pass
 
-    # Heuristic fallback (simple)
-    fungal_score = 0
-    pest_score = 0
-    for d in daily_forecasts:
-        h = d.get("humidity", 0) or 0
-        desc = (d.get("desc", "") or d.get("description", "") or "").lower()
-        if h >= 80 and ("rain" in desc or "shower" in desc or "thunder" in desc):
-            fungal_score += 1
-        if (d.get("temp", 0) or 0) >= 30 and h < 50:
-            pest_score += 1
-
-    fungal_risk = "High" if fungal_score >= 2 else ("Moderate" if fungal_score == 1 else "Low")
-    pest_risk = "High" if pest_score >= 2 else ("Moderate" if pest_score == 1 else "Low")
-
-    lines = []
-    if fungal_risk != "Low": lines.append(f"Fungal risk {fungal_risk} due to humid/rainy periods today.")
-    else: lines.append("Fungal risk Low based on today's forecast.")
-    if pest_risk != "Low": lines.append(f"Pest risk {pest_risk} due to hot/dry windows today.")
-    else: lines.append("Pest risk Low based on today's forecast.")
-
-    recs = [
-        "Remove standing water and improve drainage where possible.",
-        "If feasible, consider preventive fungicide for vulnerable crops following local guidance.",
-        "Increase scouting for pests and use traps or biological controls when found."
-    ]
-
-    return "Risk Summary (Heuristic Fallback):\n" + "\n".join(lines) + "\n\nRecommendations:\n" + "\n".join([f"- {r}" for r in recs])
-
+    # Heuristic fallback
+    return "Risk analysis fallback: Check local humidity and temperature for pest/fungal risks."
 
 # --------------------------
-# Prediction & SD helpers
+# Prediction & Visuals
 # --------------------------
 def predict(image: Image.Image, model, class_names):
-    if model is None: return "Classifier Model Unavailable", 0.0
+    if model is None: return "Model Error", 0.0
     transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
     img_tensor = transform(image).unsqueeze(0).to(DEVICE)
     with torch.no_grad():
@@ -353,489 +271,164 @@ def predict(image: Image.Image, model, class_names):
         probs = torch.nn.functional.softmax(outputs, dim=1)
         conf, preds = torch.max(probs, 1)
     idx = preds.item()
-    name = class_names[idx] if class_names and idx < len(class_names) else f"class_{idx}"
+    # Safe index access
+    name = class_names[idx] if idx < len(class_names) else f"Class_{idx}"
     return name, float(conf.item() * 100.0)
 
-def generate_healthy_leaf_img2img(base_pil_image: Image.Image, disease_label: str, strength=0.55, steps=25, guidance_scale=7.5):
-    # This now sends a request to the Colab API
-    if not load_visuals_models('img2img'):
-        raise Exception(st.session_state.get('visuals_error', "API Endpoint not configured."))
-
+def generate_healthy_leaf_img2img(base_pil_image: Image.Image, disease_label: str):
+    pipe = load_img2img()
     species = extract_species(disease_label)
     prompt = (f"A realistic close-up photo of the same {species} leaf, perfectly healthy and vibrant green, same camera angle and lighting, photorealistic, no spots or lesions.")
+    ref = base_pil_image.convert("RGB").resize(IMG2IMG_RESIZE)
+    # CPU optimization: reduced steps
+    gen = torch.Generator(device=DEVICE).manual_seed(42)
+    out = pipe(prompt=prompt, image=ref, strength=0.55, num_inference_steps=20, guidance_scale=7.5, generator=gen)
+    clear_gpu()
+    return out.images[0]
 
-    # Convert PIL image to base64 for API transmission
-    buffered = io.BytesIO()
-    base_pil_image.convert("RGB").resize((512, 512)).save(buffered, format="JPEG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-
-    payload = {
-        "image_base64": img_base64,
-        "disease_label": disease_label,
-        "request_type": "leaf",
-        "prompt": prompt
-    }
-
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(f"{COLAB_API_ENDPOINT}/generate_image", headers=headers, data=json.dumps(payload), timeout=300) # 5 min timeout for GPU
-
-    if response.status_code != 200:
-        raise Exception(f"API Error ({response.status_code}): {response.text}")
-
-    result = response.json()
-    if result.get("status") != "success":
-        raise Exception(f"GPU Execution Error: {result.get('detail', 'Unknown error')}")
-
-    # Decode and return the resulting image
-    output_image_data = base64.b64decode(result["image_base64"])
-    return Image.open(io.BytesIO(output_image_data))
-
-
-def generate_healthy_product_text2img(base_pil_image: Image.Image, disease_label: str, steps=30, guidance_scale=8.5):
-    # This now sends a request to the Colab API
-    if not load_visuals_models('text2img'):
-        raise Exception(st.session_state.get('visuals_error', "API Endpoint not configured."))
-
+def generate_healthy_product_text2img(disease_label: str):
+    pipe = load_text2img()
     species = extract_species(disease_label)
     prompt = (f"A high-quality realistic image of a healthy {species} plant with ripe fruits, vibrant colors, natural outdoor lighting, detailed leaves and fruits.")
-    
-    # Send base image (or dummy) as payload must match API model
-    buffered = io.BytesIO()
-    base_pil_image.convert("RGB").resize((1, 1)).save(buffered, format="JPEG") # Use a small dummy image
-    img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-
-    payload = {
-        "image_base64": img_base64, # Dummy image, ignored by text2img logic on backend
-        "disease_label": disease_label,
-        "request_type": "plant",
-        "prompt": prompt
-    }
-
-    headers = {"Content-Type": "application/json"}
-    response = requests.post(f"{COLAB_API_ENDPOINT}/generate_image", headers=headers, data=json.dumps(payload), timeout=300) # 5 min timeout for GPU
-
-    if response.status_code != 200:
-        raise Exception(f"API Error ({response.status_code}): {response.text}")
-
-    result = response.json()
-    if result.get("status") != "success":
-        raise Exception(f"GPU Execution Error: {result.get('detail', 'Unknown error')}")
-
-    # Decode and return the resulting image
-    output_image_data = base64.b64decode(result["image_base64"])
-    return Image.open(io.BytesIO(output_image_data))
-
+    # CPU optimization: reduced steps
+    gen = torch.Generator(device=DEVICE).manual_seed(42)
+    out = pipe(prompt=prompt, num_inference_steps=20, guidance_scale=8.5, generator=gen, height=TEXT2IMG_RES, width=TEXT2IMG_RES)
+    clear_gpu()
+    return out.images[0]
 
 # --------------------------
-# Main UI (sidebar moved inside main; chatbot removed)
+# Main UI
 # --------------------------
 def main():
-    # --- SESSION STATE INITIALIZATION ---
+    # --- 1. Session State Setup ---
     if 'analyzed' not in st.session_state: st.session_state.analyzed = False
-    if 'prediction' not in st.session_state: st.session_state.prediction = ""
-    if 'confidence' not in st.session_state: st.session_state.confidence = 0.0
-    if 'treatment_en' not in st.session_state: st.session_state.treatment_en = ""
-    if 'translated_treatment' not in st.session_state: st.session_state.translated_treatment = ""
-    if 'translated_risk' not in st.session_state: st.session_state.translated_risk = ""
+    if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
+    if 'prediction' not in st.session_state: st.session_state.prediction = None
+    if 'treatment_en' not in st.session_state: st.session_state.treatment_en = None
     if 'leaf_img' not in st.session_state: st.session_state.leaf_img = None
     if 'plant_img' not in st.session_state: st.session_state.plant_img = None
-    if 'uploaded_image' not in st.session_state: st.session_state.uploaded_image = None
-    if 'treatment_audio_bytes' not in st.session_state: st.session_state.treatment_audio_bytes = b""
-    if 'risk_audio_bytes' not in st.session_state: st.session_state.risk_audio_bytes = b""
-    if 'risk_analyzed' not in st.session_state: st.session_state.risk_analyzed = False
-    if 'visuals_generated' not in st.session_state: st.session_state.visuals_generated = False
-    if 'visuals_running' not in st.session_state: st.session_state.visuals_running = False # NEW: Running flag
-    if 'visuals_error' not in st.session_state: st.session_state.visuals_error = None
-    if 'analysis_error' not in st.session_state: st.session_state.analysis_error = ""
-
-
-    # show GPU info once in sidebar
+    
     show_device_info()
 
-    # Sidebar: weather manual input (India only)
-    if "weather_info" not in st.session_state:
-        st.session_state.weather_info = None
-    if "manual_city" not in st.session_state:
-        st.session_state.manual_city = ""
+    # --- Weather Sidebar ---
+    if "weather_info" not in st.session_state: st.session_state.weather_info = None
+    if "manual_city" not in st.session_state: st.session_state.manual_city = ""
 
     st.sidebar.header("🌦️ Weather (Manual city — India)")
     st.sidebar.write("Country: **India 🇮🇳** (fixed)")
+    st.session_state.manual_city = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city)
+
+    if st.sidebar.button("Get Weather (Manual)"):
+        city = st.session_state.manual_city.strip()
+        if city and "OPENWEATHER_KEY" in st.secrets:
+            with st.spinner("Fetching weather..."):
+                coords = geocode_city_to_coords(city, st.secrets["OPENWEATHER_KEY"])
+                if coords:
+                    lat, lon, rname = coords
+                    cur = get_current_weather(rname, st.secrets["OPENWEATHER_KEY"])
+                    forc = get_forecast_3h(rname, st.secrets["OPENWEATHER_KEY"])
+                    if cur:
+                        st.session_state.weather_info = {"city": rname, "current": cur, "forecast3h": forc}
+                        st.sidebar.success(f"Loaded: {rname}")
+                else:
+                    st.sidebar.error("City not found.")
     
-    # ----------------------------------------------------
-    # Weather Input Logic
-    # ----------------------------------------------------
-    city_input = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city, key="city_input_key")
-
-    def fetch_weather():
-        city = city_input.strip()
-        st.session_state.manual_city = city # Update session state for persistence
-
-        if city == "":
-            st.sidebar.error("Please enter a city name.")
-            return
-        if "OPENWEATHER_KEY" not in st.secrets or not st.secrets["OPENWEATHER_KEY"]:
-            st.sidebar.error("OPENWEATHER_KEY missing from Streamlit secrets.")
-            return
-        
-        api_key = st.secrets["OPENWEATHER_KEY"]
-
-        with st.spinner("Fetching weather data..."):
-            coords = geocode_city_to_coords(city, api_key)
-            if not coords:
-                st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling.")
-                return
-
-            lat, lon, resolved_name = coords
-            current = get_current_weather(resolved_name, api_key)
-            forecast = get_forecast_3h(resolved_name, api_key)
-
-            if not current:
-                st.sidebar.error("Failed to fetch current weather.")
-                return
-
-            st.session_state.weather_info = {
-                "city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast
-            }
-            # Reset risk state when new weather data is fetched
-            st.session_state.risk_analyzed = False
-            st.sidebar.success(f"Weather loaded for {resolved_name}")
-
-    st.sidebar.button("Get Weather (Manual)", on_click=fetch_weather)
-
-    # Sidebar quick summary
-    if st.session_state.get("weather_info"):
-        info = st.session_state["weather_info"]
+    if st.session_state.weather_info:
+        info = st.session_state.weather_info
         cur = info.get("current", {})
         if cur:
-            tval = cur.get("main", {}).get("temp"); hum = cur.get("main", {}).get("humidity")
-            desc = cur.get("weather", [{}])[0].get("description","").title()
-            st.sidebar.markdown(f"**{info.get('city','')}**")
-            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
-            st.sidebar.write(desc)
+            st.sidebar.write(f"🌡️ {cur.get('main',{}).get('temp')}°C")
+            st.sidebar.write(cur.get('weather',[{}])[0].get('description','').title())
 
-    # Main content
-    # language selection (UI & TTS)
-    if "ui_lang_code" not in st.session_state: st.session_state.ui_lang_code = "en"
-    
-    selected_label = st.sidebar.selectbox("🌐 Translate & TTS language", 
-                                        list(LANGUAGES.keys()), 
-                                        index=list(LANGUAGES.keys()).index("English"))
-    
-    target_lang_code = LANGUAGES.get(selected_label, "en")
-    st.session_state.ui_lang_code = target_lang_code
-    translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
+    # --- Main Content ---
+    st.title("🩺 AI Plant Doctor")
+    st.markdown("Upload a leaf photo to diagnose disease, get treatment, and see healthy projections.")
 
-    def t(text: str) -> str:
-        try:
-            return text if selected_label == "English" else translator_ui.translate(text)
-        except Exception:
-            return text
-
-    st.title(t("🩺 AI Plant Doctor"))
-    st.markdown(t("Upload a leaf photo to diagnose the disease and get AI treatment plus today's weather-aware risk."))
-
-    uploaded_file = st.file_uploader(t("📤 Upload a leaf image"), type=["jpg", "jpeg", "png"])
-    
-    # Store uploaded file persistently only if a new one is uploaded
-    if uploaded_file:
-        try:
-            image = Image.open(uploaded_file).convert("RGB")
-            st.session_state.uploaded_image = image
-            st.session_state.analyzed = False # Reset analysis flag if new image
-            st.session_state.visuals_generated = False # Reset visuals flag
-            st.session_state.leaf_img = None
-            st.session_state.plant_img = None
-        except Exception as e:
-            st.error(f"Error loading image: {e}")
-            st.session_state.uploaded_image = None
-            return
-    elif st.session_state.uploaded_image:
-        image = st.session_state.uploaded_image
-    else:
-        st.caption(t("Tip: Use a clear close-up of the leaf."))
+    uploaded_file = st.file_uploader("📤 Upload a leaf image", type=["jpg", "jpeg", "png"])
+    if not uploaded_file:
+        st.caption("Tip: Use a clear close-up.")
         return
 
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Uploaded Image", width='stretch')
 
-    # Display the image persistently
-    st.image(image, caption=t("Uploaded Image"), width='stretch')
-
-    # ----------------------------------------------------
-    # ANALYSIS BUTTON LOGIC
-    # ----------------------------------------------------
-    if st.button(t("🔍 Analyze")):
-        st.session_state.analyzed = False # Ensure we don't display old results if analysis fails
-        st.session_state.visuals_generated = False # Reset visuals
-        st.session_state.visuals_running = False # Reset running flag
-        st.session_state.treatment_audio_bytes = b"" # Clear audio cache
-        st.session_state.risk_audio_bytes = b"" # Clear audio cache
-        st.session_state.leaf_img = None
-        st.session_state.plant_img = None
-        st.session_state.analysis_error = "" # Clear previous error
-        
-        # 1. Classification
+    # --- Analysis Button ---
+    if st.button("🔍 Analyze"):
         model = load_classifier()
-        if model is None: 
-            st.rerun() 
-            return
-
-        class_names = get_class_names()
-        with st.spinner(t("Running classifier...")):
-            prediction, confidence = predict(image, model, class_names)
-            st.session_state.prediction = prediction
-            st.session_state.confidence = confidence
-
-        # --- KEY STATUS CHECK & ERROR HANDLING ---
-        key_status = st.secrets.get("OPENAI_API_KEY", "")
-        if not key_status or len(key_status) < 10 or key_status.startswith("sk-YOUR"):
-            st.error("🔑 OpenAI Key Status: Missing or Invalid. Check Streamlit Secrets UI.")
-            st.session_state.analysis_error = "OpenAI key issue. Cannot generate treatment."
-            st.rerun()
-            return
-        st.success("🔑 OpenAI Key Status: Key appears valid.")
-        # --- END DEBUG CHECK ---
-
-
-        # 2. Treatment Generation
-        with st.spinner(t("Generating AI-based treatment...")):
-            treatment_en = generate_treatment_with_ai(prediction)
-            
-            # Check if generation failed
-            if treatment_en.startswith("⚠️"):
-                st.session_state.analysis_error = treatment_en
+        if model:
+            class_names = get_class_names()
+            with st.spinner("Analyzing leaf..."):
+                pred, conf = predict(image, model, class_names)
+                st.session_state.prediction = pred
+                st.session_state.confidence = conf
+                
+                # Generate Treatment
+                treatment = generate_treatment_with_ai(pred)
+                st.session_state.treatment_en = treatment
+                
+                # Reset visuals state for new image
+                st.session_state.visuals_generated = False
+                st.session_state.leaf_img = None
+                st.session_state.plant_img = None
+                
+                st.session_state.analyzed = True
                 st.rerun()
-                return
 
-            # Translate treatment
-            try:
-                translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
-            except Exception:
-                translated_treatment = treatment_en
-            
-            st.session_state.treatment_en = treatment_en
-            st.session_state.translated_treatment = translated_treatment
-            
-        # 3. Finalize Analysis (Set flag to true after all data is saved)
-        st.session_state.analyzed = True
-        st.rerun() # Rerun to display persistent results
-
-    # ----------------------------------------------------
-    # PERSISTENT RESULTS DISPLAY
-    # ----------------------------------------------------
-    if st.session_state.analysis_error:
-        st.error(st.session_state.analysis_error)
-    
+    # --- Display Results (Persistent) ---
     if st.session_state.analyzed:
-        # Display Prediction
-        st.success(f"🌿 {t('Prediction')}: {t(st.session_state.prediction)}")
-        st.write(f"📊 {t('Model Confidence')}: {st.session_state.confidence:.2f}%")
-
-        # Display Treatment
-        with st.expander(t("AI-Generated Treatment (original)")):
-            st.write(st.session_state.treatment_en)
-
-        st.subheader(t("AI-Generated Treatment"))
-        st.write(st.session_state.translated_treatment)
+        st.success(f"🌿 Prediction: {st.session_state.prediction}")
+        st.write(f"📊 Confidence: {st.session_state.confidence:.2f}%")
         
-        # Treatment TTS & Download Button
-        if not st.session_state.treatment_audio_bytes or st.session_state.get('last_tts_text') != st.session_state.translated_treatment:
-             with st.spinner(t("Generating speech for treatment...")):
-                st.session_state.treatment_audio_bytes = generate_tts_bytes(st.session_state.translated_treatment, lang_code=target_lang_code)
-                st.session_state.last_tts_text = st.session_state.translated_treatment
-             
-        if st.session_state.treatment_audio_bytes and len(st.session_state.treatment_audio_bytes) > 10:
-            st.audio(st.session_state.treatment_audio_bytes, format="audio/mp3")
-            st.download_button(
-                label=t("⬇️ Download Treatment MP3"), 
-                data=st.session_state.treatment_audio_bytes, 
-                file_name="treatment.mp3", 
-                mime="audio/mpeg"
-            )
-        else:
-            st.error(t("TTS generation for treatment failed."))
-
-
-        # ----------------------------------------------------
-        # WEATHER AND RISK SECTION
-        # ----------------------------------------------------
-        st.markdown("---")
-        st.header(t("🌦️ Current Weather + Today's Forecast (3-hour slots)"))
-
-        if not st.session_state.get("weather_info"):
-            st.info(t("Set City in the sidebar and click 'Get Weather (Manual)' to fetch current weather and today's forecast (3-hour)."))
-        else:
-            # Run risk analysis only if weather was just updated or if we haven't analyzed yet
-            if not st.session_state.risk_analyzed:
-                with st.spinner(t("Assessing weather-based disease risk...")):
-                    info = st.session_state["weather_info"]
-                    todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
-                    
-                    openai_key = st.secrets.get("OPENAI_API_KEY")
-                    raw_risk = assess_weather_risk_with_ai(todays_items, info.get("city",""), openai_key)
-                    
-                    try:
-                        translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
-                    except Exception:
-                        translated_risk = raw_risk
-                    
-                    st.session_state.translated_risk = translated_risk
-                    st.session_state.risk_analyzed = True
-                    st.session_state.risk_audio_bytes = b"" # Reset risk audio
-                    st.rerun()
-            
-            # Display Weather and Risk Details (Reading from session state)
-            info = st.session_state["weather_info"]
-            cur = info.get("current")
-            if cur:
-                name = info.get("city", "")
-                temp = cur.get("main", {}).get("temp"); feels = cur.get("main", {}).get("feels_like")
-                humidity = cur.get("main", {}).get("humidity"); wind = cur.get("wind", {}).get("speed")
-                desc = cur.get("weather", [{}])[0].get("description","").title()
-                st.subheader(t(f"Current weather — {name}"))
-                st.write(t(f"🌡️ Temperature: {temp}°C (Feels like {feels}°C)"))
-                st.write(t(f"💧 Humidity: {humidity}%  ⚡ Wind: {wind} m/s"))
-                st.write(t(f"📘 Condition: {desc}"))
-
-            todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
-            if todays_items:
-                st.subheader(t("Today's short-term forecast"))
-                df_rows = [{"Time": it["time"].split(" ")[1][:5], "Temp (°C)": it.get("temp"), "Feels": it.get("feels_like"), "Humidity (%)": it.get("humidity"), "Condition": it.get("desc")} for it in todays_items]
-                st.table(df_rows[:6])
-            else:
-                st.info(t("No detailed 3-hour forecast available for today."))
-
-            # Display Weather Risk
-            st.subheader(t("Weather-based Disease Risk (today)"))
-            st.write(st.session_state.translated_risk)
-            
-            # Risk TTS & Download Button
-            if not st.session_state.risk_audio_bytes:
-                 with st.spinner(t("Generating speech for risk analysis...")):
-                    st.session_state.risk_audio_bytes = generate_tts_bytes(st.session_state.translated_risk, lang_code=target_lang_code)
-
-            if st.session_state.risk_audio_bytes and len(st.session_state.risk_audio_bytes) > 10:
-                st.audio(st.session_state.risk_audio_bytes, format="audio/mp3")
-                st.download_button(
-                    label=t("⬇️ Download Risk MP3"), 
-                    data=st.session_state.risk_audio_bytes, 
-                    file_name="risk_analysis.mp3", 
-                    mime="audio/mpeg"
-                )
-            else:
-                st.error(t("TTS generation for risk failed."))
-
-
-        # ----------------------------------------------------
-        # OPTIONAL AI VISUALS (Moved behind a dedicated button)
-        # ----------------------------------------------------
-        st.markdown("---")
-        st.header(t("Optional: AI visuals (healthy leaf & plant)"))
+        st.subheader("AI Treatment Plan")
+        st.write(st.session_state.treatment_en)
         
-        # New Button Logic for image generation
-        if st.session_state.prediction:
-            
-            # --- START GENERATION BUTTON ---
-            if not st.session_state.visuals_generated and not st.session_state.visuals_running:
-                if st.button(t("🎨 Generate AI Visuals (Slow)")):
-                    if COLAB_API_ENDPOINT == "YOUR_COLAB_API_ENDPOINT" or not COLAB_API_ENDPOINT:
-                        st.error(t("API Endpoint not set. Update COLAB_API_ENDPOINT in app.py."))
-                    else:
-                        st.session_state.visuals_running = True
-                        st.rerun() # Rerun to enter the running state and show spinner immediately
-            # --- END GENERATION BUTTON ---
-            
-            # --- RUNNING STATE ---
-            if st.session_state.visuals_running:
-                with st.spinner(t("Generating AI visuals... (Sending to GPU backend, please wait)")):
+        # Audio Button (Will not erase results now!)
+        tts_bytes = generate_tts_bytes(st.session_state.treatment_en)
+        if tts_bytes:
+            st.audio(tts_bytes, format="audio/mp3")
+            st.download_button("⬇️ Download Audio", tts_bytes, "treatment.mp3", "audio/mpeg")
+
+        st.markdown("---")
+        
+        # --- Visuals Generation Section ---
+        st.subheader("Optional: AI Visuals (Healthy Projection)")
+        
+        # Show button if visuals haven't been generated yet
+        if not st.session_state.visuals_generated:
+            if st.button("🎨 Generate AI Visuals (Slow on CPU)"):
+                with st.spinner("Generating visuals... This may take a few minutes on CPU."):
                     try:
-                        # 1. Run the API calls (This is the long-running, blocking part)
                         leaf_img = generate_healthy_leaf_img2img(image, st.session_state.prediction)
-                        plant_img = generate_healthy_product_text2img(image, st.session_state.prediction)
+                        plant_img = generate_healthy_product_text2img(st.session_state.prediction)
                         
-                        # 2. Save results and switch to completed state
                         st.session_state.leaf_img = leaf_img
                         st.session_state.plant_img = plant_img
                         st.session_state.visuals_generated = True
-                        st.session_state.visuals_running = False # Switch off running flag
-                        st.rerun() # Rerun to display images
+                        st.rerun()
                     except Exception as e:
-                        # 3. Handle failure
-                        st.session_state.visuals_running = False # Switch off running flag
-                        st.error(f"AI visuals failed: {e}")
-            
-            # --- COMPLETED STATE ---
-            if st.session_state.visuals_generated:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.subheader(t("Healthy Leaf (AI-Repaired)"))
-                    st.image(st.session_state.leaf_img, width='stretch')
-                with c2:
-                    st.subheader(t("Healthy Plant (AI)"))
-                    st.image(st.session_state.plant_img, width='stretch')
-            
-            # --- WAITING STATE ---
-            elif not st.session_state.visuals_generated and st.session_state.analyzed and not st.session_state.visuals_running:
-                st.info(t("Click the 'Generate AI Visuals (Slow)' button above to create model images."))
+                        st.error(f"Visual generation failed: {e}")
+        
+        # Show images if they exist
+        if st.session_state.visuals_generated:
+            c1, c2 = st.columns(2)
+            with c1:
+                st.subheader("Healthy Leaf")
+                st.image(st.session_state.leaf_img, width='stretch')
+            with c2:
+                st.subheader("Healthy Plant")
+                st.image(st.session_state.plant_img, width='stretch')
 
-
-    st.markdown("---")
-    st.caption(t("© 2025 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
-
-# --------------------------
-# Floating Chat Widget (retained from original file)
-# --------------------------
-import streamlit.components.v1 as components
-chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
-floating_widget = f"""
-<style>
-#floatingChatContainer {{
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    z-index: 999999999;
-    pointer-events: none;
-}}
-#chatButton {{
-    width: 65px;
-    height: 65px;
-    background-color: #4CAF50;
-    color: white;
-    border-radius: 50%;
-    border: none;
-    font-size: 30px;
-    cursor: pointer;
-    margin: 20px;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
-    pointer-events: auto;
-}}
-#chatFrame {{
-    width: 360px;
-    height: 480px;
-    border-radius: 14px;
-    border: none;
-    display: none;
-    margin-right: 20px;
-    margin-bottom: 95px;
-    box-shadow: 0 0 20px rgba(0,0,0,0.4);
-    pointer-events: auto;
-}}
-</style>
-
-<div id="floatingChatContainer">
-    <iframe id="chatFrame" src="{chatbot_url}"></iframe>
-    <button id="chatButton">💬</button>
-</div>
-
-<script>
-const btn = document.getElementById("chatButton");
-const frame = document.getElementById("chatFrame");
-
-btn.onclick = function() {{
-    frame.style.display = frame.style.display === "none" ? "block" : "none";
-}};
-</script>
-"""
-components.html(floating_widget, height=0, width=0)
-
+    # Chatbot Widget (Always visible)
+    import streamlit.components.v1 as components
+    chatbot_html = """
+    <div style="position: fixed; bottom: 0; right: 0; z-index: 9999;">
+        <script>
+        // Simple placeholder for chat widget script if needed
+        </script>
+        <button style="background:#4CAF50; color:white; border:none; border-radius:50%; width:60px; height:60px; font-size:30px; margin:20px; cursor:pointer; box-shadow:0px 4px 10px rgba(0,0,0,0.3);" onclick="alert('Chatbot would open here')">💬</button>
+    </div>
+    """
+    components.html(chatbot_html, height=100)
 
 if __name__ == "__main__":
     main()
