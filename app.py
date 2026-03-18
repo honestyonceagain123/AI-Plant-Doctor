@@ -1,5 +1,5 @@
-# app.py — AI Plant Doctor (clean, chatbot included, Option B: 3-hour forecast only, NO HUGGINGFACE/DIFFUSERS)
-# Requirements: streamlit, torch, torchvision, gTTS, deep_translator, google-generativeai, requests, pandas, pillow, numpy, opencv-python
+# app.py — AI Plant Doctor (Dark Theme, Center Big Login, Floating Username)
+# Requirements: streamlit, torch, torchvision, gTTS, deep_translator, google-generativeai, requests, pandas, pillow, numpy, opencv-python-headless
 
 import os
 import sys
@@ -30,16 +30,97 @@ import pandas as pd
 import streamlit.components.v1 as components
 
 # --------------------------
-# Page config + device
+# Page config
 # --------------------------
-st.set_page_config(page_title="AI Plant Doctor", page_icon="🩺", layout="wide")
+st.set_page_config(page_title="AI Plant Doctor", page_icon="🌱", layout="wide", initial_sidebar_state="expanded")
 
-# 🔥 FIX FOR SIDEBAR: Force hide the Streamlit default multi-page navigation (like 'login', 'app')
+# ==========================================
+# KHATARNAK DARK THEME CSS 🔥
+# ==========================================
 st.markdown(
     """
     <style>
-    [data-testid="stSidebarNav"] {
-        display: none !important;
+    /* Force Dark Theme Backgrounds */
+    .stApp {
+        background-color: #0f172a; /* Slate 900 */
+        color: #f8fafc; /* Slate 50 */
+    }
+    
+    [data-testid="stHeader"] {
+        background-color: transparent;
+    }
+
+    [data-testid="stSidebar"] {
+        background-color: #1e293b; /* Slate 800 */
+        border-right: 1px solid #334155;
+    }
+
+    /* Primary Buttons (Green Gradient) */
+    div.stButton > button:first-child {
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: white;
+        border-radius: 8px;
+        border: none;
+        padding: 0.5rem 1rem;
+        font-weight: 600;
+        box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
+        transition: all 0.2s;
+        width: 100%;
+    }
+    div.stButton > button:first-child:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
+        border: none;
+    }
+
+    /* Hide Streamlit Branding */
+    #MainMenu { visibility: hidden; }
+    footer { visibility: hidden; }
+
+    /* Login Box Container Styling */
+    .login-container {
+        background-color: #1e293b;
+        padding: 40px;
+        border-radius: 16px;
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        border: 1px solid #334155;
+    }
+
+    /* Floating Welcome Banner Animation (5 Sec) */
+    @keyframes slideDownUp {
+        0% { top: -100px; opacity: 0; transform: translateX(-50%) scale(0.9); }
+        10% { top: 30px; opacity: 1; transform: translateX(-50%) scale(1); }
+        85% { top: 30px; opacity: 1; transform: translateX(-50%) scale(1); }
+        100% { top: -100px; opacity: 0; transform: translateX(-50%) scale(0.9); }
+    }
+    .welcome-float {
+        position: fixed;
+        top: -100px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: linear-gradient(135deg, #10b981, #059669);
+        color: white;
+        padding: 16px 40px;
+        border-radius: 50px;
+        font-size: 20px;
+        font-weight: bold;
+        box-shadow: 0 15px 35px rgba(16,185,129,0.4);
+        z-index: 9999999;
+        animation: slideDownUp 5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        pointer-events: none;
+        border: 2px solid rgba(255,255,255,0.2);
+    }
+    
+    /* Text Inputs Dark */
+    .stTextInput input {
+        background-color: #334155 !important;
+        color: #f8fafc !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px !important;
+    }
+    .stTextInput input:focus {
+        border-color: #10b981 !important;
+        box-shadow: 0 0 0 1px #10b981 !important;
     }
     </style>
     """,
@@ -49,44 +130,47 @@ st.markdown(
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --------------------------
+# Session States
+# --------------------------
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+if "user_email" not in st.session_state:
+    st.session_state["user_email"] = ""
+if "username" not in st.session_state:
+    st.session_state["username"] = ""
+if "just_logged_in" not in st.session_state:
+    st.session_state["just_logged_in"] = False
+
+# --------------------------
 # Languages mapping
 # --------------------------
 LANGUAGES = {
-    "English": "en",
-    "Hindi (हिन्दी)": "hi",
-    "Tamil (தமிழ்)": "ta",
-    "Telugu (తెలుగు)": "te",
-    "Bengali (বাংলা)": "bn",
-    "Gujarati (ગુજરાતી)": "gu",
-    "Punjabi (ਪੰਜਾਬੀ)": "pa",
-    "Marathi (मराठी)": "mr",
-    "Urdu (اردو)": "ur",
-    "French (Français)": "fr",
-    "German (Deutsch)": "de",
-    "Spanish (Español)": "es",
-    "Chinese (中文)": "zh-cn",
-    "Japanese (日本語)": "ja"
+    "English": "en", "Hindi (हिन्दी)": "hi", "Tamil (தமிழ்)": "ta", "Telugu (తెలుగు)": "te",
+    "Bengali (বাংলা)": "bn", "Gujarati (ગુજરાતી)": "gu", "Punjabi (ਪੰਜਾਬੀ)": "pa",
+    "Marathi (मराठी)": "mr", "Urdu (اردو)": "ur", "French (Français)": "fr",
+    "German (Deutsch)": "de", "Spanish (Español)": "es", "Chinese (中文)": "zh-cn", "Japanese (日本語)": "ja"
 }
 
 # --------------------------
-# Helper: device info banner
+# Firebase Auth Functions (REST API)
 # --------------------------
-def show_device_info():
-    if DEVICE == "cuda":
-        try:
-            name = torch.cuda.get_device_name(0)
-        except Exception:
-            name = "CUDA GPU"
-        st.sidebar.success(f"Using GPU: {name}")
-    else:
-        st.sidebar.warning("GPU not available — running on CPU.")
+def firebase_login(email, password, api_key):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key={api_key}"
+    data = {"email": email, "password": password, "returnSecureToken": True}
+    r = requests.post(url, json=data)
+    return r.json()
+
+def firebase_signup(email, password, api_key):
+    url = f"https://identitytoolkit.googleapis.com/v1/accounts:signUp?key={api_key}"
+    data = {"email": email, "password": password, "returnSecureToken": True}
+    r = requests.post(url, json=data)
+    return r.json()
 
 # --------------------------
 # Model loaders (cached)
 # --------------------------
 @st.cache_resource
 def load_plant_detector():
-    """Loads ResNet18 binary classifier to check if image is actually a plant"""
     model = models.resnet18(weights=None) 
     model.fc = nn.Linear(model.fc.in_features, 2)
     try:
@@ -99,7 +183,7 @@ def load_plant_detector():
         model.eval()
         return model
     except FileNotFoundError:
-        return None # Return None if not found, we'll skip the check gracefully
+        return None
 
 @st.cache_resource
 def load_classifier(weight_path="best_plant_model.pth"):
@@ -120,7 +204,6 @@ def get_class_names(train_dir="dataset/train"):
         return []
     return sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
 
-
 # --------------------------
 # Image Validation Helpers
 # --------------------------
@@ -128,8 +211,7 @@ def is_clear_leaf_image(pil_img):
     img = np.array(pil_img)
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
     blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-    if blur_score < 80:
-        return False
+    if blur_score < 80: return False
     return True
 
 def has_enough_green(image: Image.Image):
@@ -140,9 +222,7 @@ def has_enough_green(image: Image.Image):
     return green_ratio > 0.05
 
 def is_plant_image(image, model):
-    if model is None: 
-        return True, 100.0 # Skip check if model missing
-        
+    if model is None: return True, 100.0
     transform = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -152,10 +232,8 @@ def is_plant_image(image, model):
     with torch.no_grad():
         logits = model(img_t)
         probs = torch.softmax(logits, dim=1)[0]
-    
     plant_prob = probs[1].item()
     entropy = -torch.sum(probs * torch.log(probs + 1e-8)).item()
-    
     if plant_prob < 0.95 or entropy > 0.25 or not has_enough_green(image):
         return False, plant_prob * 100
     return True, plant_prob * 100
@@ -164,8 +242,6 @@ def is_plant_image(image, model):
 # Helpers & TTS cleaning
 # --------------------------
 def clean_text_for_tts(text: str) -> str:
-    if not isinstance(text, str):
-        text = str(text)
     text = re.sub(r"```.*?```", " ", text, flags=re.S)
     text = re.sub(r"`.+?`", " ", text)
     text = re.sub(r"^[\-\*\+\>\#]+\s*", " ", text, flags=re.M)
@@ -179,17 +255,14 @@ def clean_text_for_tts(text: str) -> str:
 
 def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
     cleaned = clean_text_for_tts(text)
-    try:
-        supported = gtts_langs.tts_langs()
-    except Exception:
-        supported = {"en":"English"}
+    try: supported = gtts_langs.tts_langs()
+    except Exception: supported = {"en":"English"}
+    
     if lang_code not in supported:
-        if lang_code.startswith("zh"):
-            lang_code = "zh-cn" if "zh-cn" in supported else "zh"
-        elif lang_code == "pa" and "pa" not in supported:
-            lang_code = "hi" if "hi" in supported else "en"
-        else:
-            lang_code = "en"
+        if lang_code.startswith("zh"): lang_code = "zh-cn" if "zh-cn" in supported else "zh"
+        elif lang_code == "pa" and "pa" not in supported: lang_code = "hi" if "hi" in supported else "en"
+        else: lang_code = "en"
+        
     audio_buf = io.BytesIO()
     try:
         tts = gTTS(text=cleaned, lang=lang_code)
@@ -203,8 +276,7 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
             tts.write_to_fp(audio_buf)
             audio_buf.seek(0)
             return audio_buf.read()
-        except Exception:
-            return b""
+        except Exception: return b""
 
 # --------------------------
 # Gemini AI treatment
@@ -212,21 +284,12 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
 def generate_treatment_with_ai(disease_name: str) -> str:
     if "GEMINI_API_KEY" not in st.secrets:
         return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
-    
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        
-        prompt = f"""
-        You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
-        Provide:
-        1. A short cause summary
-        2. Clear actionable treatment steps (step-by-step)
-        3. Preventive tips for future
-        Please keep sentences short and simple.
-        """
-        response = model.generate_content(prompt)
-        return response.text.strip()
+        prompt = f"""You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
+        Provide: 1. A short cause summary. 2. Clear actionable treatment steps. 3. Preventive tips. Keep it simple."""
+        return model.generate_content(prompt).text.strip()
     except Exception as e:
         return f"⚠️ AI generation failed: {e}"
 
@@ -235,118 +298,43 @@ def generate_treatment_with_ai(disease_name: str) -> str:
 # --------------------------
 def geocode_city_to_coords(city: str, api_key: str):
     try:
-        q = f"{city},IN"
-        url = "http://api.openweathermap.org/geo/1.0/direct"
-        params = {"q": q, "limit": 1, "appid": api_key}
-        r = requests.get(url, params=params, timeout=12)
-        r.raise_for_status()
+        r = requests.get("http://api.openweathermap.org/geo/1.0/direct", params={"q": f"{city},IN", "limit": 1, "appid": api_key}, timeout=12)
         data = r.json()
-        if not data:
-            return None
+        if not data: return None
         return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("name", city)
-    except Exception:
-        return None
+    except Exception: return None
 
 def get_current_weather(city: str, api_key: str):
     try:
-        url = "https://api.openweathermap.org/data/2.5/weather"
-        params = {"q": f"{city},IN", "units": "metric", "appid": api_key}
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+        return requests.get("https://api.openweathermap.org/data/2.5/weather", params={"q": f"{city},IN", "units": "metric", "appid": api_key}, timeout=10).json()
+    except Exception: return None
 
 def get_forecast_3h(city: str, api_key: str):
-    """5-day / 3-hour forecast (free). We'll extract today's entries."""
     try:
-        url = "https://api.openweathermap.org/data/2.5/forecast"
-        params = {"q": f"{city},IN", "units": "metric", "appid": api_key}
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        return r.json()
-    except Exception:
-        return None
+        return requests.get("https://api.openweathermap.org/data/2.5/forecast", params={"q": f"{city},IN", "units": "metric", "appid": api_key}, timeout=10).json()
+    except Exception: return None
 
 def get_todays_forecast_from_3h(forecast_json):
-    """Return list of forecast items (dicts) from forecast_json that belong to today (local date)."""
-    if not forecast_json or "list" not in forecast_json:
-        return []
+    if not forecast_json or "list" not in forecast_json: return []
     today = time.strftime("%Y-%m-%d", time.localtime())
     items = []
     for item in forecast_json["list"]:
-        dt_txt = item.get("dt_txt", "")  # format "YYYY-MM-DD HH:MM:SS"
+        dt_txt = item.get("dt_txt", "")
         if dt_txt.startswith(today):
-            # keep relevant fields
-            items.append({
-                "time": dt_txt,
-                "temp": item.get("main", {}).get("temp"),
-                "feels_like": item.get("main", {}).get("feels_like"),
-                "humidity": item.get("main", {}).get("humidity"),
-                "desc": item.get("weather", [{}])[0].get("description", "")
-            })
+            items.append({"time": dt_txt, "temp": item.get("main", {}).get("temp"), "feels_like": item.get("main", {}).get("feels_like"), "humidity": item.get("main", {}).get("humidity"), "desc": item.get("weather", [{}])[0].get("description", "")})
     return items
 
-# --------------------------
-# Weather -> risk function (Gemini Integration)
-# --------------------------
 def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", gemini_key: str = None):
-    summary_lines = []
-    for d in daily_forecasts:
-        desc = d.get("description") or d.get("desc", "") or ""
-        temp = d.get("temp", d.get("temp_day", None))
-        humidity = d.get("humidity", None)
-        summary_lines.append(f"{d.get('time', d.get('date',''))}: {desc}, temp {temp}°C, humidity {humidity}%")
+    summary_lines = [f"{d.get('time')}: {d.get('desc')}, temp {d.get('temp')}°C, hum {d.get('humidity')}%" for d in daily_forecasts]
     summary_text = "\n".join(summary_lines[:12])
-
     if gemini_key:
         try:
             genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel('gemini-2.5-flash')
-            prompt = f"""
-            You are an agricultural expert. Given the short-term weather summary for {location_name} below, provide:
-            1) Short risk assessment for common plant diseases (fungal, bacterial, viral, pests) — Low/Moderate/High + 1-line reason each.
-            2) 3 quick recommendations farmers can do today or this week.
-            Weather:
-            {summary_text}
-            Keep it short and simple.
-            """
-            response = model.generate_content(prompt)
-            return response.text.strip()
-        except Exception:
-            pass
-
-    # Heuristic fallback
-    fungal_score = 0
-    pest_score = 0
-    for d in daily_forecasts:
-        h = d.get("humidity", 0) or 0
-        desc = (d.get("desc", "") or d.get("description", "") or "").lower()
-        if h >= 80 and ("rain" in desc or "shower" in desc or "thunder" in desc):
-            fungal_score += 1
-        if (d.get("temp", 0) or 0) >= 30 and h < 50:
-            pest_score += 1
-
-    fungal_risk = "High" if fungal_score >= 2 else ("Moderate" if fungal_score == 1 else "Low")
-    pest_risk = "High" if pest_score >= 2 else ("Moderate" if pest_score == 1 else "Low")
-
-    lines = []
-    if fungal_risk != "Low":
-        lines.append(f"Fungal risk {fungal_risk} due to humid/rainy periods today.")
-    else:
-        lines.append("Fungal risk Low based on today's forecast.")
-    if pest_risk != "Low":
-        lines.append(f"Pest risk {pest_risk} due to hot/dry windows today.")
-    else:
-        lines.append("Pest risk Low based on today's forecast.")
-
-    recs = [
-        "Remove standing water and improve drainage where possible.",
-        "If feasible, consider preventive fungicide for vulnerable crops following local guidance.",
-        "Increase scouting for pests and use traps or biological controls when found."
-    ]
-
-    return "Risk Summary:\n" + "\n".join(lines) + "\n\nRecommendations:\n" + "\n".join([f"- {r}" for r in recs])
+            prompt = f"Expert agriculture short risk assessment for {location_name} based on: {summary_text}. Give Risk level (Low/Mod/High) for fungal/pest and 3 quick tips."
+            return model.generate_content(prompt).text.strip()
+        except Exception: pass
+    return "Risk Summary: Moderate.\nRecommendations: Ensure drainage, monitor crops."
 
 # --------------------------
 # Prediction Helper
@@ -363,271 +351,251 @@ def predict(image: Image.Image, model, class_names):
     return name, float(conf.item() * 100.0)
 
 
-# --------------------------
-# Main UI
-# --------------------------
-def main():
-    show_device_info()
+# ==========================
+# CENTERED BIG LOGIN UI
+# ==========================
+def render_auth_page():
+    # Hide sidebar when logged out
+    st.markdown("""<style>[data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
+    
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("<h1 style='text-align: center; color: #10b981; font-size: 4em; font-weight: 900;'>AI Plant Doctor</h1>", unsafe_allow_html=True)
+    st.markdown("<h4 style='text-align: center; color: #94a3b8; margin-bottom: 40px;'>Your Smart Agricultural Assistant</h4>", unsafe_allow_html=True)
 
-    if "weather_info" not in st.session_state:
-        st.session_state.weather_info = None
-    if "manual_city" not in st.session_state:
-        st.session_state.manual_city = ""
+    if "FIREBASE_API_KEY" not in st.secrets:
+        st.error("⚠️ FIREBASE_API_KEY missing in secrets.toml")
+        return
+    api_key = st.secrets["FIREBASE_API_KEY"]
 
-    st.sidebar.header("🌦️ Weather (Manual city — India)")
-    st.sidebar.write("Country: **India 🇮🇳** (fixed)")
+    # Use columns to center the login box and make it comfortably wide
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    
+    with col2:
+        st.markdown('<div class="login-container">', unsafe_allow_html=True)
+        tab1, tab2 = st.tabs(["🔑 Secure Login", "📝 Create Account"])
+        
+        with tab1:
+            st.markdown("### Welcome Back")
+            login_email = st.text_input("Email", key="login_email", placeholder="farmer@example.com")
+            login_password = st.text_input("Password", type="password", key="login_password", placeholder="••••••••")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Login", use_container_width=True):
+                if login_email and login_password:
+                    with st.spinner("Authenticating..."):
+                        res = firebase_login(login_email, login_password, api_key)
+                        if "error" in res:
+                            st.error(f"❌ {res['error'].get('message', 'Login failed')}")
+                        else:
+                            st.session_state["logged_in"] = True
+                            st.session_state["user_email"] = res["email"]
+                            st.session_state["username"] = res["email"].split("@")[0].capitalize()
+                            st.session_state["just_logged_in"] = True
+                            st.rerun()
+                else:
+                    st.warning("Enter email and password.")
+                    
+        with tab2:
+            st.markdown("### Join AI Plant Doctor")
+            signup_email = st.text_input("Email", key="signup_email", placeholder="farmer@example.com")
+            signup_password = st.text_input("Password", type="password", key="signup_password", placeholder="Min 6 characters")
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("Sign Up", use_container_width=True):
+                if signup_email and len(signup_password) >= 6:
+                    with st.spinner("Creating profile..."):
+                        res = firebase_signup(signup_email, signup_password, api_key)
+                        if "error" in res:
+                            st.error(f"❌ {res['error'].get('message', 'Signup failed')}")
+                        else:
+                            st.success("✅ Account created successfully! Please switch to the Login tab.")
+                else:
+                    st.warning("Valid email and 6+ char password required.")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ==========================
+# UNLOCKED MAIN APP
+# ==========================
+def main_app():
+    # Show sidebar control when logged in
+    st.markdown("""<style>[data-testid="collapsedControl"] {display: block;}</style>""", unsafe_allow_html=True)
+
+    # 5-SECOND FLOATING USERNAME POPUP
+    if st.session_state.get("just_logged_in"):
+        st.session_state["just_logged_in"] = False
+        st.markdown(
+            f"""
+            <div class="welcome-float">
+                👋 Welcome, <span style="color:#a7f3d0;">{st.session_state['username']}</span>! Let's heal some plants.
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+    # --------------------------
+    # Logged-In Sidebar
+    # --------------------------
+    st.sidebar.markdown(f"### 👤 Profile")
+    st.sidebar.info(f"**{st.session_state['username']}**\n\n{st.session_state['user_email']}")
+    
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state["logged_in"] = False
+        st.session_state["user_email"] = ""
+        st.session_state["username"] = ""
+        st.rerun()
+        
+    st.sidebar.markdown("---")
+    if DEVICE == "cuda":
+        try: name = torch.cuda.get_device_name(0)
+        except: name = "CUDA GPU"
+        st.sidebar.success(f"🚀 Powered by: {name}")
+    else:
+        st.sidebar.warning("⚡ Running on CPU.")
+    st.sidebar.markdown("---")
+
+    # --------------------------
+    # Weather Module in Sidebar
+    # --------------------------
+    if "weather_info" not in st.session_state: st.session_state.weather_info = None
+    if "manual_city" not in st.session_state: st.session_state.manual_city = ""
+
+    st.sidebar.header("🌦️ Field Weather")
     st.session_state.manual_city = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city)
 
-    if st.sidebar.button("Get Weather (Manual)"):
+    if st.sidebar.button("Get Weather"):
         city = st.session_state.manual_city.strip()
-        if city == "":
-            st.sidebar.error("Please enter a city name.")
-        elif "OPENWEATHER_KEY" not in st.secrets:
-            st.sidebar.error("OPENWEATHER_KEY missing from .streamlit/secrets.toml")
-        else:
+        if city and "OPENWEATHER_KEY" in st.secrets:
             coords = geocode_city_to_coords(city, st.secrets["OPENWEATHER_KEY"])
-            if not coords:
-                cur = get_current_weather(city, st.secrets["OPENWEATHER_KEY"])
-                if not cur or cur.get("cod") == 401:
-                    if cur and cur.get("cod") == 401:
-                        st.sidebar.error("OpenWeather API returned 401: Invalid API key. Check your OPENWEATHER_KEY in secrets.")
-                    else:
-                        st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling.")
-                else:
-                    name = cur.get("name", city)
-                    forecast = get_forecast_3h(name, st.secrets["OPENWEATHER_KEY"])
-                    st.session_state.weather_info = {"city": name, "lat": None, "lon": None, "current": cur, "forecast3h": forecast}
-                    st.sidebar.success(f"Weather loaded for {name}")
-            else:
-                lat, lon, resolved_name = coords
-                current = get_current_weather(resolved_name, st.secrets["OPENWEATHER_KEY"])
-                forecast = get_forecast_3h(resolved_name, st.secrets["OPENWEATHER_KEY"])
-                if not current:
-                    st.sidebar.error("Failed to fetch current weather for resolved city.")
-                else:
-                    st.session_state.weather_info = {"city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast}
-                    st.sidebar.success(f"Weather loaded for {resolved_name}")
+            city_name = coords[2] if coords else city
+            cur = get_current_weather(city_name, st.secrets["OPENWEATHER_KEY"])
+            forecast = get_forecast_3h(city_name, st.secrets["OPENWEATHER_KEY"])
+            if cur and cur.get("cod") != 401:
+                st.session_state.weather_info = {"city": city_name, "current": cur, "forecast3h": forecast}
+                st.sidebar.success(f"Weather updated: {city_name}")
+            else: st.sidebar.error("Error fetching weather.")
 
     if st.session_state.get("weather_info"):
         info = st.session_state["weather_info"]
-        cur = info.get("current", {})
-        if cur:
-            tval = cur.get("main", {}).get("temp"); hum = cur.get("main", {}).get("humidity")
-            desc = cur.get("weather", [{}])[0].get("description","").title()
-            st.sidebar.markdown(f"**{info.get('city','')}**")
-            st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
-            st.sidebar.write(desc)
+        if info.get("current"):
+            cur = info["current"]
+            st.sidebar.markdown(f"**{info['city']}** | 🌡️ {cur['main']['temp']}°C | 💧 {cur['main']['humidity']}%")
+            st.sidebar.caption(cur["weather"][0]["description"].title())
 
-    if "ui_lang_code" not in st.session_state:
-        st.session_state.ui_lang_code = "en"
-    selected_label = st.sidebar.selectbox("🌐 Translate & TTS language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
-    target_lang_code = LANGUAGES.get(selected_label, "en")
-    st.session_state.ui_lang_code = target_lang_code
-    translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
+    # --------------------------
+    # Main App UI
+    # --------------------------
+    col_main, col_lang = st.columns([3, 1])
+    with col_lang:
+        selected_label = st.selectbox("🌐 Translation & Voice", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
+        target_lang_code = LANGUAGES.get(selected_label, "en")
+        translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
 
     def t(text: str) -> str:
-        try:
-            return text if selected_label == "English" else translator_ui.translate(text)
-        except Exception:
-            return text
+        try: return text if selected_label == "English" else translator_ui.translate(text)
+        except Exception: return text
 
-    st.title(t("🩺 AI Plant Doctor"))
-    st.markdown(t("Upload a leaf photo to diagnose the disease and get AI treatment plus today's weather-aware risk."))
-
-    uploaded_file = st.file_uploader(t("📤 Upload a leaf image"), type=["jpg", "jpeg", "png"])
-    if not uploaded_file:
-        st.caption(t("Tip: Use a clear close-up of the leaf."))
-        return
-
-    image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption=t("Uploaded Image"), use_column_width=True)
-
-    if st.button(t("🔍 Analyze")):
-        
-        # 1. Quality & Content checks first!
-        if not is_clear_leaf_image(image):
-            st.error(t("❌ Image is blurry or not a leaf"))
-            return
-
-        detector = load_plant_detector()
-        with st.spinner(t("Checking if image is a plant...")):
-            plant_ok, plant_conf = is_plant_image(image, detector)
-
-        if not plant_ok or plant_conf < 90:
-            st.error(t("❌ Uploaded image is NOT a clear plant"))
-            st.info(t(f"Plant confidence: {plant_conf:.2f}%"))
-            st.warning(t("Upload a close-up leaf with plain background"))
-            return
-            
-        st.success(t(f"✅ Plant detected ({plant_conf:.2f}%)"))
-
-        # 2. Main Classification
-        try:
-            model = load_classifier()
-        except FileNotFoundError as e:
-            st.error(str(e))
-            return
-
-        class_names = get_class_names()
-        with st.spinner(t("Running classifier...")):
-            try:
-                prediction, confidence = predict(image, model, class_names)
-            except Exception as e:
-                st.error(f"Classifier failed: {e}")
-                return
-
-        st.success(f"🌿 {t('Prediction')}: {t(prediction)}")
-        st.write(f"📊 {t('Model Confidence')}: {confidence:.2f}%")
-
-        st.session_state.last_diagnosis = prediction
-
-        # 3. Treatment
-        if str(prediction).lower() == "healthy":
-            st.success(t("Great news! The plant looks healthy. Keep up the good work!"))
-        else:
-            with st.spinner(t("Generating AI-based treatment...")):
-                treatment_en = generate_treatment_with_ai(prediction)
-
-            try:
-                translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
-            except Exception:
-                translated_treatment = treatment_en
-
-            st.session_state.last_treatment = treatment_en
-
-            with st.expander(t("AI-Generated Treatment (original)")):
-                st.write(treatment_en)
-
-            st.subheader(t("AI-Generated Treatment"))
-            st.write(translated_treatment)
-
-            with st.spinner(t("Generating speech for treatment...")):
-                treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
-            if treatment_audio and len(treatment_audio) > 10:
-                st.audio(treatment_audio, format="audio/mp3")
-                st.download_button(label=t("⬇️ Download Treatment MP3"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
-            else:
-                st.error(t("TTS generation for treatment failed."))
-
-        # 4. Weather & Forecast
-        st.markdown("---")
-        st.header(t("🌦️ Current Weather + Today's Forecast (3-hour slots)"))
-
-        if not st.session_state.get("weather_info"):
-            st.info(t("Set City in the sidebar and click 'Get Weather (Manual)' to fetch current weather and today's forecast (3-hour)."))
-        else:
-            info = st.session_state["weather_info"]
-            cur = info.get("current")
-            forecast3h = info.get("forecast3h")
-            if cur:
-                name = info.get("city", "")
-                temp = cur.get("main", {}).get("temp")
-                feels = cur.get("main", {}).get("feels_like")
-                humidity = cur.get("main", {}).get("humidity")
-                wind = cur.get("wind", {}).get("speed")
-                desc = cur.get("weather", [{}])[0].get("description","").title()
-                st.subheader(t(f"Current weather — {name}"))
-                st.write(t(f"🌡️ Temperature: {temp}°C (Feels like {feels}°C)"))
-                st.write(t(f"💧 Humidity: {humidity}%  ⚡ Wind: {wind} m/s"))
-                st.write(t(f"📘 Condition: {desc}"))
-
-            todays_items = get_todays_forecast_from_3h(forecast3h) if forecast3h else []
-            if todays_items:
-                st.subheader(t("Today's short-term forecast"))
-                df_rows = []
-                for it in todays_items:
-                    df_rows.append({
-                        "Time": it["time"].split(" ")[1][:5],
-                        "Temp (°C)": it.get("temp"),
-                        "Feels": it.get("feels_like"),
-                        "Humidity (%)": it.get("humidity"),
-                        "Condition": it.get("desc")
-                    })
-                st.table(df_rows[:6])
-            else:
-                st.info(t("No detailed 3-hour forecast available for today."))
-
-            with st.spinner(t("Assessing weather-based disease risk...")):
-                gemini_key = st.secrets.get("GEMINI_API_KEY")
-                raw_risk = assess_weather_risk_with_ai(todays_items if todays_items else [{"desc": desc, "temp": temp, "humidity": humidity, "time": time.strftime("%Y-%m-%d %H:%M:%S")}], info.get("city",""), gemini_key)
-
-            try:
-                translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
-            except Exception:
-                translated_risk = raw_risk
-
-            st.subheader(t("Weather-based Disease Risk (today)"))
-            st.write(translated_risk)
-
-            with st.spinner(t("Generating speech for risk analysis...")):
-                risk_audio = generate_tts_bytes(translated_risk, lang_code=target_lang_code)
-            if risk_audio and len(risk_audio) > 10:
-                st.audio(risk_audio, format="audio/mp3")
-                st.download_button(label=t("⬇️ Download Risk MP3"), data=risk_audio, file_name="risk_analysis.mp3", mime="audio/mpeg")
-            else:
-                st.error(t("TTS generation for risk failed."))
+    with col_main:
+        st.title(t("🩺 AI Plant Doctor Core"))
+        st.markdown(t("Upload a close-up photo of the affected leaf for instant diagnosis and AI-generated treatment."))
 
     st.markdown("---")
-    st.caption(t("© 2026 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
+    uploaded_file = st.file_uploader(t("📤 Upload a leaf image"), type=["jpg", "jpeg", "png"])
+    
+    if uploaded_file:
+        image = Image.open(uploaded_file).convert("RGB")
+        # Ensure image takes up reasonable space without being huge
+        col_img, _ = st.columns([1, 1])
+        with col_img:
+            st.image(image, caption=t("Uploaded Image"), use_column_width=True)
 
-# --------------------------
-# Floating Chat Widget
-# --------------------------
-chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
+        if st.button(t("🔍 Analyze Plant Health"), use_container_width=True):
+            if not is_clear_leaf_image(image):
+                st.error(t("❌ Image is blurry or not a leaf"))
+            else:
+                detector = load_plant_detector()
+                with st.spinner(t("Scanning leaf biology...")):
+                    plant_ok, plant_conf = is_plant_image(image, detector)
 
-floating_widget = f"""
-<style>
-#floatingChatContainer {{
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    z-index: 999999999; /* Always on top */
-    pointer-events: none; /* Prevent Streamlit capturing clicks */
-}}
+                if not plant_ok or plant_conf < 90:
+                    st.error(t("❌ Uploaded image is NOT a clear plant"))
+                    st.warning(t("Please upload a close-up leaf with plain background"))
+                else:
+                    st.success(t(f"✅ Plant verified ({plant_conf:.2f}%)"))
 
-#chatButton {{
-    width: 65px;
-    height: 65px;
-    background-color: #4CAF50;
-    color: white;
-    border-radius: 50%;
-    border: none;
-    font-size: 30px;
-    cursor: pointer;
-    margin: 20px;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
-    pointer-events: auto; /* Button clickable */
-}}
+                    try:
+                        model = load_classifier()
+                        class_names = get_class_names()
+                        with st.spinner(t("Running Neural Network...")):
+                            prediction, confidence = predict(image, model, class_names)
+                            
+                            st.success(f"🌿 {t('Diagnosis')}: {t(prediction)} (Conf: {confidence:.2f}%)")
 
-#chatFrame {{
-    width: 360px;
-    height: 480px;
-    border-radius: 14px;
-    border: none;
-    display: none;
-    margin-right: 20px;
-    margin-bottom: 95px;
-    box-shadow: 0 0 20px rgba(0,0,0,0.4);
-    pointer-events: auto; /* Frame clickable */
-}}
-</style>
+                            if str(prediction).lower() == "healthy":
+                                st.balloons()
+                                st.success(t("Great news! The plant looks healthy. Keep up the good work!"))
+                            else:
+                                with st.spinner(t("Generating AI Treatment Protocol...")):
+                                    treatment_en = generate_treatment_with_ai(prediction)
+                                    translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
 
-<div id="floatingChatContainer">
-    <iframe id="chatFrame" src="{chatbot_url}"></iframe>
-    <button id="chatButton">💬</button>
-</div>
+                                st.subheader(t("AI-Generated Treatment Plan"))
+                                st.info(translated_treatment)
 
-<script>
-const btn = document.getElementById("chatButton");
-const frame = document.getElementById("chatFrame");
+                                with st.spinner(t("Generating Voice Assistant...")):
+                                    treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
+                                if treatment_audio and len(treatment_audio) > 10:
+                                    st.audio(treatment_audio, format="audio/mp3")
+                                    st.download_button(label=t("⬇️ Download Audio"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
+                    except Exception as e:
+                        st.error(f"Engine Error: {e}")
 
-btn.onclick = function() {{
-    frame.style.display = frame.style.display === "none" ? "block" : "none";
-}};
-</script>
-"""
+    # Weather Risk Section
+    st.markdown("---")
+    st.header(t("🌦️ AI Weather Risk Analysis"))
+    if not st.session_state.get("weather_info"):
+        st.info(t("Set your City in the sidebar to get weather-based disease risk predictions."))
+    else:
+        info = st.session_state["weather_info"]
+        todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
+        if todays_items:
+            with st.spinner(t("Analyzing weather conditions...")):
+                raw_risk = assess_weather_risk_with_ai(todays_items, info.get("city",""), st.secrets.get("GEMINI_API_KEY"))
+                translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
+            st.warning(translated_risk)
+        else:
+            st.info(t("Detailed forecast unavailable currently."))
 
-components.html(floating_widget, height=0, width=0)
+    st.markdown("---")
+    st.caption("© 2026 AI Plant Doctor — Empowering Farmers with AI 🌾")
 
-if __name__ == "__main__":
-    main()
+    # --------------------------
+    # Floating Chat Widget (Protected)
+    # --------------------------
+    chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
+    floating_widget = f"""
+    <style>
+    #floatingChatContainer {{ position: fixed; bottom: 0; right: 0; z-index: 999999999; pointer-events: none; }}
+    #chatButton {{ width: 65px; height: 65px; background: linear-gradient(135deg, #10b981, #059669); color: white; border-radius: 50%; border: none; font-size: 30px; cursor: pointer; margin: 20px; box-shadow: 0px 4px 15px rgba(16,185,129,0.5); pointer-events: auto; transition: transform 0.3s; }}
+    #chatButton:hover {{ transform: scale(1.1); }}
+    #chatFrame {{ width: 360px; height: 480px; border-radius: 14px; border: none; display: none; margin-right: 20px; margin-bottom: 95px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); pointer-events: auto; }}
+    </style>
+    <div id="floatingChatContainer">
+        <iframe id="chatFrame" src="{chatbot_url}"></iframe>
+        <button id="chatButton">💬</button>
+    </div>
+    <script>
+    const btn = document.getElementById("chatButton");
+    const frame = document.getElementById("chatFrame");
+    btn.onclick = function() {{ frame.style.display = frame.style.display === "none" ? "block" : "none"; }};
+    </script>
+    """
+    components.html(floating_widget, height=0, width=0)
+
+# ==========================
+# APP ROUTER
+# ==========================
+if st.session_state["logged_in"]:
+    main_app()
+else:
+    render_auth_page()
