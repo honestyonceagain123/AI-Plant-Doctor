@@ -1,7 +1,14 @@
-# app.py — AI Plant Doctor (clean, chatbot removed, Option B: 3-hour forecast only)
-# Requirements: streamlit, torch, torchvision, diffusers, gTTS, deep_translator, openai, requests, pandas, pillow, numpy
+# app.py — AI Plant Doctor (clean, chatbot included, Option B: 3-hour forecast only, NO HUGGINGFACE/DIFFUSERS)
+# Requirements: streamlit, torch, torchvision, gTTS, deep_translator, google-generativeai, requests, pandas, pillow, numpy, opencv-python
 
 import os
+import sys
+
+# 🔥 FIX: Use environment variables to force PyTorch
+os.environ["DISABLE_TF"] = "1"
+os.environ["USE_TF"] = "0"
+os.environ["USE_TORCH"] = "1"
+
 import re
 import io
 import time
@@ -9,24 +16,37 @@ import requests
 import streamlit as st
 from PIL import Image
 import numpy as np
+import cv2
+
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
-from openai import OpenAI
-from diffusers import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
+import google.generativeai as genai  # Gemini API
+
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
+
+import streamlit.components.v1 as components
 
 # --------------------------
 # Page config + device
 # --------------------------
 st.set_page_config(page_title="AI Plant Doctor", page_icon="🩺", layout="wide")
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 
-IMG2IMG_RESIZE = (512, 512)
-TEXT2IMG_RES = 512
+# 🔥 FIX FOR SIDEBAR: Force hide the Streamlit default multi-page navigation (like 'login', 'app')
+st.markdown(
+    """
+    <style>
+    [data-testid="stSidebarNav"] {
+        display: none !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --------------------------
 # Languages mapping
@@ -49,7 +69,7 @@ LANGUAGES = {
 }
 
 # --------------------------
-# Helper: device info banner (will display once from main)
+# Helper: device info banner
 # --------------------------
 def show_device_info():
     if DEVICE == "cuda":
@@ -59,11 +79,28 @@ def show_device_info():
             name = "CUDA GPU"
         st.sidebar.success(f"Using GPU: {name}")
     else:
-        st.sidebar.warning("GPU not available — running on CPU (Slow for SD).")
+        st.sidebar.warning("GPU not available — running on CPU.")
 
 # --------------------------
 # Model loaders (cached)
 # --------------------------
+@st.cache_resource
+def load_plant_detector():
+    """Loads ResNet18 binary classifier to check if image is actually a plant"""
+    model = models.resnet18(weights=None) 
+    model.fc = nn.Linear(model.fc.in_features, 2)
+    try:
+        checkpoint = torch.load("plant_detector_final.pth", map_location=DEVICE)
+        if 'model_state_dict' in checkpoint:
+            model.load_state_dict(checkpoint['model_state_dict'])
+        else:
+            model.load_state_dict(checkpoint)
+        model.to(DEVICE)
+        model.eval()
+        return model
+    except FileNotFoundError:
+        return None # Return None if not found, we'll skip the check gracefully
+
 @st.cache_resource
 def load_classifier(weight_path="best_plant_model.pth"):
     model = models.resnet50(weights=None)
@@ -83,57 +120,49 @@ def get_class_names(train_dir="dataset/train"):
         return []
     return sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
 
-@st.cache_resource
-def load_text2img(model_id="runwayml/stable-diffusion-v1-5"):
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
-    if hasattr(pipe, "enable_attention_slicing"):
-        pipe.enable_attention_slicing()
-    if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
-        try:
-            pipe.enable_xformers_memory_efficient_attention()
-        except Exception:
-            pass
-    if hasattr(pipe, "enable_vae_tiling"):
-        try:
-            pipe.enable_vae_tiling()
-        except Exception:
-            pass
-    return pipe
 
-@st.cache_resource
-def load_img2img(model_id="runwayml/stable-diffusion-v1-5"):
-    pipe = StableDiffusionImg2ImgPipeline.from_pretrained(model_id, torch_dtype=DTYPE, safety_checker=None).to(DEVICE)
-    if hasattr(pipe, "enable_attention_slicing"):
-        pipe.enable_attention_slicing()
-    if hasattr(pipe, "enable_xformers_memory_efficient_attention"):
-        try:
-            pipe.enable_xformers_memory_efficient_attention()
-        except Exception:
-            pass
-    if hasattr(pipe, "enable_vae_tiling"):
-        try:
-            pipe.enable_vae_tiling()
-        except Exception:
-            pass
-    return pipe
+# --------------------------
+# Image Validation Helpers
+# --------------------------
+def is_clear_leaf_image(pil_img):
+    img = np.array(pil_img)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+    if blur_score < 80:
+        return False
+    return True
+
+def has_enough_green(image: Image.Image):
+    img = np.array(image)
+    r, g, b = img[:,:,0], img[:,:,1], img[:,:,2]
+    green_pixels = (g > r + 15) & (g > b + 15)
+    green_ratio = np.sum(green_pixels) / green_pixels.size
+    return green_ratio > 0.05
+
+def is_plant_image(image, model):
+    if model is None: 
+        return True, 100.0 # Skip check if model missing
+        
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+    ])
+    img_t = transform(image).unsqueeze(0).to(DEVICE)
+    with torch.no_grad():
+        logits = model(img_t)
+        probs = torch.softmax(logits, dim=1)[0]
+    
+    plant_prob = probs[1].item()
+    entropy = -torch.sum(probs * torch.log(probs + 1e-8)).item()
+    
+    if plant_prob < 0.95 or entropy > 0.25 or not has_enough_green(image):
+        return False, plant_prob * 100
+    return True, plant_prob * 100
 
 # --------------------------
 # Helpers & TTS cleaning
 # --------------------------
-def extract_species(disease_label):
-    base = disease_label.split("__")[0] if "__" in disease_label else disease_label
-    parts = [p for p in base.replace("___", "_").split("_") if p.isalpha()]
-    return parts[0].lower() if parts else ''.join([c for c in disease_label if c.isalpha()])[:10].lower()
-
-def clear_gpu():
-    if DEVICE == "cuda":
-        try:
-            torch.cuda.empty_cache()
-            if hasattr(torch.cuda, "ipc_collect"):
-                torch.cuda.ipc_collect()
-        except Exception:
-            pass
-
 def clean_text_for_tts(text: str) -> str:
     if not isinstance(text, str):
         text = str(text)
@@ -178,32 +207,31 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
             return b""
 
 # --------------------------
-# OpenAI treatment (English)
+# Gemini AI treatment
 # --------------------------
 def generate_treatment_with_ai(disease_name: str) -> str:
-    if "OPENAI_API_KEY" not in st.secrets:
-        return "⚠️ OPENAI_API_KEY missing from Streamlit secrets."
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    prompt = f"""
-You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
-Provide:
-1. A short cause summary
-2. Clear actionable treatment steps (step-by-step)
-3. Preventive tips for future
-Please keep sentences short and simple.
-"""
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
+    
     try:
-        response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"system","content":"You are an agricultural expert AI."},{"role":"user","content":prompt}],)
-        if hasattr(response, "choices"):
-            content = response.choices[0].message.content
-        else:
-            content = getattr(response, "text", str(response))
-        return content.strip()
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = f"""
+        You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
+        Provide:
+        1. A short cause summary
+        2. Clear actionable treatment steps (step-by-step)
+        3. Preventive tips for future
+        Please keep sentences short and simple.
+        """
+        response = model.generate_content(prompt)
+        return response.text.strip()
     except Exception as e:
         return f"⚠️ AI generation failed: {e}"
 
 # --------------------------
-# OpenWeather free helpers: geocode, current, forecast(3h)
+# OpenWeather free helpers
 # --------------------------
 def geocode_city_to_coords(city: str, api_key: str):
     try:
@@ -260,40 +288,35 @@ def get_todays_forecast_from_3h(forecast_json):
     return items
 
 # --------------------------
-# Weather -> risk function (same as before)
+# Weather -> risk function (Gemini Integration)
 # --------------------------
-def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", openai_key: str = None):
-    # daily_forecasts is a list of dicts with keys like 'time'/'temp'/'humidity'/'description'
+def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", gemini_key: str = None):
     summary_lines = []
     for d in daily_forecasts:
         desc = d.get("description") or d.get("desc", "") or ""
         temp = d.get("temp", d.get("temp_day", None))
         humidity = d.get("humidity", None)
         summary_lines.append(f"{d.get('time', d.get('date',''))}: {desc}, temp {temp}°C, humidity {humidity}%")
-    summary_text = "\n".join(summary_lines[:12])  # use up to several slots for context
+    summary_text = "\n".join(summary_lines[:12])
 
-    # Try OpenAI if key present
-    if openai_key:
+    if gemini_key:
         try:
-            client = OpenAI(api_key=openai_key)
+            genai.configure(api_key=gemini_key)
+            model = genai.GenerativeModel('gemini-2.5-flash')
             prompt = f"""
-You are an agricultural expert. Given the short-term weather summary for {location_name} below, provide:
-1) Short risk assessment for common plant diseases (fungal, bacterial, viral, pests) — Low/Moderate/High + 1-line reason each.
-2) 3 quick recommendations farmers can do today or this week.
-Weather:
-{summary_text}
-Keep it short and simple.
-"""
-            response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role":"user","content":prompt}],)
-            if hasattr(response, "choices"):
-                return response.choices[0].message.content.strip()
-            else:
-                return getattr(response, "text", str(response))
+            You are an agricultural expert. Given the short-term weather summary for {location_name} below, provide:
+            1) Short risk assessment for common plant diseases (fungal, bacterial, viral, pests) — Low/Moderate/High + 1-line reason each.
+            2) 3 quick recommendations farmers can do today or this week.
+            Weather:
+            {summary_text}
+            Keep it short and simple.
+            """
+            response = model.generate_content(prompt)
+            return response.text.strip()
         except Exception:
-            # fall through to heuristic
             pass
 
-    # Heuristic fallback (simple)
+    # Heuristic fallback
     fungal_score = 0
     pest_score = 0
     for d in daily_forecasts:
@@ -326,7 +349,7 @@ Keep it short and simple.
     return "Risk Summary:\n" + "\n".join(lines) + "\n\nRecommendations:\n" + "\n".join([f"- {r}" for r in recs])
 
 # --------------------------
-# Prediction & SD helpers
+# Prediction Helper
 # --------------------------
 def predict(image: Image.Image, model, class_names):
     transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
@@ -339,33 +362,13 @@ def predict(image: Image.Image, model, class_names):
     name = class_names[idx] if class_names and idx < len(class_names) else f"class_{idx}"
     return name, float(conf.item() * 100.0)
 
-def generate_healthy_leaf_img2img(base_pil_image: Image.Image, disease_label: str, strength=0.55, steps=25, guidance_scale=7.5):
-    pipe = load_img2img()
-    species = extract_species(disease_label)
-    prompt = (f"A realistic close-up photo of the same {species} leaf, perfectly healthy and vibrant green, same camera angle and lighting, photorealistic, no spots or lesions.")
-    ref = base_pil_image.convert("RGB").resize(IMG2IMG_RESIZE)
-    gen = torch.Generator(device=DEVICE).manual_seed(np.random.randint(0, 2**31 - 1))
-    out = pipe(prompt=prompt, image=ref, strength=strength, num_inference_steps=int(steps), guidance_scale=float(guidance_scale), generator=gen)
-    clear_gpu()
-    return out.images[0]
-
-def generate_healthy_product_text2img(disease_label: str, steps=30, guidance_scale=8.5):
-    pipe = load_text2img()
-    species = extract_species(disease_label)
-    prompt = (f"A high-quality realistic image of a healthy {species} plant with ripe fruits, vibrant colors, natural outdoor lighting, detailed leaves and fruits.")
-    gen = torch.Generator(device=DEVICE).manual_seed(np.random.randint(0, 2**31 - 1))
-    out = pipe(prompt=prompt, num_inference_steps=int(steps), guidance_scale=float(guidance_scale), generator=gen, height=TEXT2IMG_RES, width=TEXT2IMG_RES)
-    clear_gpu()
-    return out.images[0]
 
 # --------------------------
-# Main UI (sidebar moved inside main; chatbot removed)
+# Main UI
 # --------------------------
 def main():
-    # show GPU info once in sidebar
     show_device_info()
 
-    # Sidebar: weather manual input (India only)
     if "weather_info" not in st.session_state:
         st.session_state.weather_info = None
     if "manual_city" not in st.session_state:
@@ -382,16 +385,14 @@ def main():
         elif "OPENWEATHER_KEY" not in st.secrets:
             st.sidebar.error("OPENWEATHER_KEY missing from .streamlit/secrets.toml")
         else:
-            # Try geocoding to get canonical name (optional)
             coords = geocode_city_to_coords(city, st.secrets["OPENWEATHER_KEY"])
             if not coords:
                 cur = get_current_weather(city, st.secrets["OPENWEATHER_KEY"])
                 if not cur or cur.get("cod") == 401:
-                    # 401 indicates invalid API key
                     if cur and cur.get("cod") == 401:
                         st.sidebar.error("OpenWeather API returned 401: Invalid API key. Check your OPENWEATHER_KEY in secrets.")
                     else:
-                        st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling (e.g., Mumbai, Delhi).")
+                        st.sidebar.error("Could not resolve city or fetch weather. Try a major city spelling.")
                 else:
                     name = cur.get("name", city)
                     forecast = get_forecast_3h(name, st.secrets["OPENWEATHER_KEY"])
@@ -407,7 +408,6 @@ def main():
                     st.session_state.weather_info = {"city": resolved_name, "lat": lat, "lon": lon, "current": current, "forecast3h": forecast}
                     st.sidebar.success(f"Weather loaded for {resolved_name}")
 
-    # Sidebar quick summary
     if st.session_state.get("weather_info"):
         info = st.session_state["weather_info"]
         cur = info.get("current", {})
@@ -418,8 +418,6 @@ def main():
             st.sidebar.write(f"🌡️ {tval} °C   💧 {hum}%")
             st.sidebar.write(desc)
 
-    # Main content
-    # language selection (UI & TTS)
     if "ui_lang_code" not in st.session_state:
         st.session_state.ui_lang_code = "en"
     selected_label = st.sidebar.selectbox("🌐 Translate & TTS language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
@@ -442,10 +440,28 @@ def main():
         return
 
     image = Image.open(uploaded_file).convert("RGB")
-    st.image(image, caption=t("Uploaded Image"), use_container_width=True)
+    st.image(image, caption=t("Uploaded Image"), use_column_width=True)
 
     if st.button(t("🔍 Analyze")):
-        # classifier
+        
+        # 1. Quality & Content checks first!
+        if not is_clear_leaf_image(image):
+            st.error(t("❌ Image is blurry or not a leaf"))
+            return
+
+        detector = load_plant_detector()
+        with st.spinner(t("Checking if image is a plant...")):
+            plant_ok, plant_conf = is_plant_image(image, detector)
+
+        if not plant_ok or plant_conf < 90:
+            st.error(t("❌ Uploaded image is NOT a clear plant"))
+            st.info(t(f"Plant confidence: {plant_conf:.2f}%"))
+            st.warning(t("Upload a close-up leaf with plain background"))
+            return
+            
+        st.success(t(f"✅ Plant detected ({plant_conf:.2f}%)"))
+
+        # 2. Main Classification
         try:
             model = load_classifier()
         except FileNotFoundError as e:
@@ -463,36 +479,37 @@ def main():
         st.success(f"🌿 {t('Prediction')}: {t(prediction)}")
         st.write(f"📊 {t('Model Confidence')}: {confidence:.2f}%")
 
-        # save diagnosis briefly in session (available if user wants to copy into external chatbot)
         st.session_state.last_diagnosis = prediction
 
-        # treatment
-        with st.spinner(t("Generating AI-based treatment...")):
-            treatment_en = generate_treatment_with_ai(prediction)
-
-        try:
-            translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
-        except Exception:
-            translated_treatment = treatment_en
-
-        st.session_state.last_treatment = treatment_en
-
-        with st.expander(t("AI-Generated Treatment (original)")):
-            st.write(treatment_en)
-
-        st.subheader(t("AI-Generated Treatment"))
-        st.write(translated_treatment)
-
-        # treatment TTS
-        with st.spinner(t("Generating speech for treatment...")):
-            treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
-        if treatment_audio and len(treatment_audio) > 10:
-            st.audio(treatment_audio, format="audio/mp3")
-            st.download_button(label=t("⬇️ Download Treatment MP3"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
+        # 3. Treatment
+        if str(prediction).lower() == "healthy":
+            st.success(t("Great news! The plant looks healthy. Keep up the good work!"))
         else:
-            st.error(t("TTS generation for treatment failed."))
+            with st.spinner(t("Generating AI-based treatment...")):
+                treatment_en = generate_treatment_with_ai(prediction)
 
-        # Weather & today's forecast (Option B — 3h forecast only)
+            try:
+                translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
+            except Exception:
+                translated_treatment = treatment_en
+
+            st.session_state.last_treatment = treatment_en
+
+            with st.expander(t("AI-Generated Treatment (original)")):
+                st.write(treatment_en)
+
+            st.subheader(t("AI-Generated Treatment"))
+            st.write(translated_treatment)
+
+            with st.spinner(t("Generating speech for treatment...")):
+                treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
+            if treatment_audio and len(treatment_audio) > 10:
+                st.audio(treatment_audio, format="audio/mp3")
+                st.download_button(label=t("⬇️ Download Treatment MP3"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
+            else:
+                st.error(t("TTS generation for treatment failed."))
+
+        # 4. Weather & Forecast
         st.markdown("---")
         st.header(t("🌦️ Current Weather + Today's Forecast (3-hour slots)"))
 
@@ -530,10 +547,9 @@ def main():
             else:
                 st.info(t("No detailed 3-hour forecast available for today."))
 
-            # Risk assessment based on today's 3h forecast
             with st.spinner(t("Assessing weather-based disease risk...")):
-                openai_key = st.secrets.get("OPENAI_API_KEY")
-                raw_risk = assess_weather_risk_with_ai(todays_items if todays_items else [{"desc": desc, "temp": temp, "humidity": humidity, "time": time.strftime("%Y-%m-%d %H:%M:%S")}], info.get("city",""), openai_key)
+                gemini_key = st.secrets.get("GEMINI_API_KEY")
+                raw_risk = assess_weather_risk_with_ai(todays_items if todays_items else [{"desc": desc, "temp": temp, "humidity": humidity, "time": time.strftime("%Y-%m-%d %H:%M:%S")}], info.get("city",""), gemini_key)
 
             try:
                 translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
@@ -543,7 +559,6 @@ def main():
             st.subheader(t("Weather-based Disease Risk (today)"))
             st.write(translated_risk)
 
-            # TTS the risk
             with st.spinner(t("Generating speech for risk analysis...")):
                 risk_audio = generate_tts_bytes(translated_risk, lang_code=target_lang_code)
             if risk_audio and len(risk_audio) > 10:
@@ -552,35 +567,12 @@ def main():
             else:
                 st.error(t("TTS generation for risk failed."))
 
-        # Optional visuals
-        st.markdown("---")
-        st.header(t("Optional: AI visuals (healthy leaf & plant)"))
-        if DEVICE == "cpu":
-            st.warning(t("Note: Generating AI visuals on CPU is slow."))
-            if not st.checkbox(t("Generate visuals anyway")):
-                return
-
-        with st.spinner(t("Generating AI visuals...")):
-            try:
-                leaf_img = generate_healthy_leaf_img2img(image, prediction)
-                plant_img = generate_healthy_product_text2img(prediction)
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.subheader(t("Healthy Leaf (AI-Repaired)"))
-                    st.image(leaf_img, use_column_width=True)
-                with c2:
-                    st.subheader(t("Healthy Plant (AI)"))
-                    st.image(plant_img, use_column_width=True)
-            except Exception as e:
-                st.error(f"AI visuals failed: {e}")
-                clear_gpu()
-
     st.markdown("---")
-    st.caption(t("© 2025 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
+    st.caption(t("© 2026 AI Plant Doctor — Smart Farming with Generative AI 🌾"))
 
-import streamlit as st
-import streamlit.components.v1 as components
-
+# --------------------------
+# Floating Chat Widget
+# --------------------------
 chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
 
 floating_widget = f"""
@@ -635,10 +627,7 @@ btn.onclick = function() {{
 </script>
 """
 
-# IMPORTANT: height=0 stops Streamlit from pushing layout down
 components.html(floating_widget, height=0, width=0)
-
-
 
 if __name__ == "__main__":
     main()
