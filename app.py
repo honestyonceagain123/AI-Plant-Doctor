@@ -1,4 +1,4 @@
-# app.py — AI Plant Doctor (Dark Theme, Center Big Login, Floating Username)
+# app.py — AI Plant Doctor (Enterprise True Dark Theme, Plantix-style Image Overlay, Gen-Z Friendly Auth)
 # Requirements: streamlit, torch, torchvision, gTTS, deep_translator, google-generativeai, requests, pandas, pillow, numpy, opencv-python-headless
 
 import os
@@ -35,58 +35,130 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="AI Plant Doctor", page_icon="🌱", layout="wide", initial_sidebar_state="expanded")
 
 # ==========================================
-# KHATARNAK DARK THEME CSS 🔥
+# ENTERPRISE TRUE DARK THEME CSS 🔥
 # ==========================================
 st.markdown(
     """
     <style>
-    /* Force Dark Theme Backgrounds */
+    /* Force True Dark Backgrounds (Pitch Black & Dark Gray) */
     .stApp {
-        background-color: #0f172a; /* Slate 900 */
-        color: #f8fafc; /* Slate 50 */
+        background-color: #050505;
+        background-image: radial-gradient(circle at 50% -20%, #151515 0%, #050505 100%);
+        color: #f8fafc;
+        font-family: 'Inter', 'Segoe UI', sans-serif;
     }
     
-    [data-testid="stHeader"] {
-        background-color: transparent;
-    }
+    [data-testid="stHeader"] { background-color: transparent; }
 
     [data-testid="stSidebar"] {
-        background-color: #1e293b; /* Slate 800 */
-        border-right: 1px solid #334155;
+        background-color: #0d0d0d !important;
+        border-right: 1px solid #1a1a1a;
     }
 
-    /* Primary Buttons (Green Gradient) */
+    /* Enterprise Primary Buttons (Sleek Green) */
     div.stButton > button:first-child {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: 600;
-        box-shadow: 0 4px 6px -1px rgba(16, 185, 129, 0.3);
-        transition: all 0.2s;
+        color: #ffffff;
+        border-radius: 12px;
+        border: 1px solid #10b981;
+        padding: 0.7rem 1.5rem;
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        box-shadow: 0 4px 20px rgba(16, 185, 129, 0.2);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         width: 100%;
+        text-transform: uppercase;
     }
     div.stButton > button:first-child:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.4);
-        border: none;
+        transform: translateY(-4px) scale(1.01);
+        box-shadow: 0 12px 30px rgba(16, 185, 129, 0.4);
+        background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+        border-color: #34d399;
+    }
+    div.stButton > button:first-child:active {
+        transform: translateY(0px);
     }
 
     /* Hide Streamlit Branding */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
 
-    /* Login Box Container Styling */
+    /* Interactive Login Box (Glassmorphism + Neon Edge) */
     .login-container {
-        background-color: #1e293b;
-        padding: 40px;
-        border-radius: 16px;
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        border: 1px solid #334155;
+        background: #111111;
+        padding: 50px;
+        border-radius: 20px;
+        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), inset 0 0 0 1px #222;
+        border: 1px solid rgba(16, 185, 129, 0.15);
+        transition: transform 0.4s ease, box-shadow 0.4s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    .login-container:hover {
+        box-shadow: 0 30px 60px rgba(0, 0, 0, 0.9), 0 0 40px rgba(16, 185, 129, 0.1), inset 0 0 0 1px #333;
+        transform: translateY(-5px);
+        border-color: rgba(16, 185, 129, 0.4);
     }
 
-    /* Floating Welcome Banner Animation (5 Sec) */
+    /* Segmented Tabs Styling */
+    .stTabs [data-baseweb="tab-list"] {
+        background-color: #0a0a0a;
+        border-radius: 12px;
+        padding: 6px;
+        gap: 8px;
+        border-bottom: none !important;
+        border: 1px solid #1f1f1f;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: transparent;
+        border-radius: 8px;
+        color: #666;
+        border: none !important;
+        padding: 12px 24px;
+        font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #10b981 !important;
+        color: white !important;
+        box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
+    }
+
+    /* Custom File Uploader Zone */
+    [data-testid="stFileUploadDropzone"] {
+        background-color: #0f0f0f !important;
+        border: 2px dashed #222 !important;
+        border-radius: 16px !important;
+        padding: 40px !important;
+        transition: all 0.3s ease;
+    }
+    [data-testid="stFileUploadDropzone"]:hover {
+        background-color: #111814 !important;
+        border-color: #10b981 !important;
+        box-shadow: 0 0 25px rgba(16, 185, 129, 0.15);
+    }
+
+    /* Text Inputs (Ultra Smooth) */
+    .stTextInput input {
+        background-color: #161616 !important;
+        color: #ffffff !important;
+        border: 1px solid #2a2a2a !important;
+        border-radius: 12px !important;
+        padding: 16px 20px !important;
+        font-size: 15px !important;
+        transition: all 0.3s ease;
+    }
+    .stTextInput input:focus {
+        border-color: #10b981 !important;
+        box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2) !important;
+        background-color: #1a1a1a !important;
+    }
+    .stTextInput input::placeholder {
+        color: #555 !important;
+    }
+
+    /* Floating Welcome Banner */
     @keyframes slideDownUp {
         0% { top: -100px; opacity: 0; transform: translateX(-50%) scale(0.9); }
         10% { top: 30px; opacity: 1; transform: translateX(-50%) scale(1); }
@@ -102,25 +174,28 @@ st.markdown(
         color: white;
         padding: 16px 40px;
         border-radius: 50px;
-        font-size: 20px;
-        font-weight: bold;
-        box-shadow: 0 15px 35px rgba(16,185,129,0.4);
+        font-size: 18px;
+        font-weight: 700;
+        box-shadow: 0 15px 35px rgba(16,185,129,0.5);
         z-index: 9999999;
         animation: slideDownUp 5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
         pointer-events: none;
-        border: 2px solid rgba(255,255,255,0.2);
+        border: 1px solid rgba(255,255,255,0.2);
+        display: flex;
+        align-items: center;
+        gap: 12px;
     }
     
-    /* Text Inputs Dark */
-    .stTextInput input {
-        background-color: #334155 !important;
-        color: #f8fafc !important;
-        border: 1px solid #475569 !important;
-        border-radius: 8px !important;
+    /* Expander / Info Boxes */
+    [data-testid="stAlert"] {
+        border-radius: 12px;
+        border: 1px solid #10b981;
+        background-color: rgba(16, 185, 129, 0.05);
     }
-    .stTextInput input:focus {
-        border-color: #10b981 !important;
-        box-shadow: 0 0 0 1px #10b981 !important;
+    .stExpander {
+        background-color: #111;
+        border-radius: 12px;
+        border: 1px solid #222;
     }
     </style>
     """,
@@ -200,12 +275,15 @@ def load_classifier(weight_path="best_plant_model.pth"):
 
 @st.cache_data
 def get_class_names(train_dir="dataset/train"):
+    if os.path.exists("classes.txt"):
+        with open("classes.txt", "r") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
     if not os.path.isdir(train_dir):
         return []
     return sorted([d for d in os.listdir(train_dir) if os.path.isdir(os.path.join(train_dir, d))])
 
 # --------------------------
-# Image Validation Helpers
+# Image Validation & Overlay Helpers (Plantix Style)
 # --------------------------
 def is_clear_leaf_image(pil_img):
     img = np.array(pil_img)
@@ -237,6 +315,54 @@ def is_plant_image(image, model):
     if plant_prob < 0.95 or entropy > 0.25 or not has_enough_green(image):
         return False, plant_prob * 100
     return True, plant_prob * 100
+
+def draw_plantix_overlay(image: Image.Image, prediction: str, confidence: float):
+    """
+    Draws a professional, Plantix-style colored overlay on the uploaded image.
+    """
+    img_cv = np.array(image)
+    img_cv = cv2.cvtColor(img_cv, cv2.COLOR_RGB2BGR)
+    h, w, _ = img_cv.shape
+    
+    # Determine Banner Color (Green for Healthy, Red for Disease)
+    is_healthy = "healthy" in prediction.lower()
+    banner_color = (30, 180, 50) if is_healthy else (30, 40, 220)  # BGR format
+    
+    # Calculate banner dimensions
+    banner_h = max(int(h * 0.15), 50)
+    
+    # Create semi-transparent overlay
+    overlay = img_cv.copy()
+    cv2.rectangle(overlay, (0, h - banner_h), (w, h), banner_color, -1)
+    cv2.addWeighted(overlay, 0.85, img_cv, 0.15, 0, img_cv)
+    
+    # Setup Text
+    font = cv2.FONT_HERSHEY_DUPLEX
+    display_text = f"{prediction.replace('_', ' ').upper()} ({confidence:.1f}%)"
+    
+    # Dynamic Scaling to fit width
+    font_scale = max(0.5, min(w, h) / 700.0)
+    thickness = max(1, int(font_scale * 2.5))
+    
+    text_size = cv2.getTextSize(display_text, font, font_scale, thickness)[0]
+    
+    # Scale down if text is too wide for the image
+    if text_size[0] > w * 0.95:
+        font_scale = font_scale * ((w * 0.95) / text_size[0])
+        thickness = max(1, int(font_scale * 2.5))
+        text_size = cv2.getTextSize(display_text, font, font_scale, thickness)[0]
+
+    # Center text coordinates
+    text_x = (w - text_size[0]) // 2
+    text_y = h - int(banner_h / 2) + (text_size[1] // 2)
+    
+    # Draw Shadow/Outline for better readability
+    cv2.putText(img_cv, display_text, (text_x + 2, text_y + 2), font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+    # Draw actual text (White)
+    cv2.putText(img_cv, display_text, (text_x, text_y), font, font_scale, (255, 255, 255), thickness, cv2.LINE_AA)
+    
+    # Convert back to PIL Image
+    return Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB))
 
 # --------------------------
 # Helpers & TTS cleaning
@@ -287,8 +413,8 @@ def generate_treatment_with_ai(disease_name: str) -> str:
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"""You are an expert agronomist AI. A farmer's leaf is diagnosed as '{disease_name}'.
-        Provide: 1. A short cause summary. 2. Clear actionable treatment steps. 3. Preventive tips. Keep it simple."""
+        prompt = f"""You are an expert plant doctor. A farmer's leaf is diagnosed with '{disease_name}'.
+        Provide: 1. A short cause summary. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."""
         return model.generate_content(prompt).text.strip()
     except Exception as e:
         return f"⚠️ AI generation failed: {e}"
@@ -331,10 +457,10 @@ def assess_weather_risk_with_ai(daily_forecasts: list, location_name: str = "", 
         try:
             genai.configure(api_key=gemini_key)
             model = genai.GenerativeModel('gemini-2.5-flash')
-            prompt = f"Expert agriculture short risk assessment for {location_name} based on: {summary_text}. Give Risk level (Low/Mod/High) for fungal/pest and 3 quick tips."
+            prompt = f"Act as a friendly farming assistant. For {location_name} with weather: {summary_text}. Give a very quick, simple risk level (Low/Mod/High) for crop diseases and 2 easy tips."
             return model.generate_content(prompt).text.strip()
         except Exception: pass
-    return "Risk Summary: Moderate.\nRecommendations: Ensure drainage, monitor crops."
+    return "Risk Level: Moderate. Ensure good drainage and keep an eye on your crops!"
 
 # --------------------------
 # Prediction Helper
@@ -352,40 +478,41 @@ def predict(image: Image.Image, model, class_names):
 
 
 # ==========================
-# CENTERED BIG LOGIN UI
+# COOL GEN-Z LOGIN UI
 # ==========================
 def render_auth_page():
-    # Hide sidebar when logged out
     st.markdown("""<style>[data-testid="collapsedControl"] {display: none;}</style>""", unsafe_allow_html=True)
     
     st.markdown("<br><br>", unsafe_allow_html=True)
-    st.markdown("<h1 style='text-align: center; color: #10b981; font-size: 4em; font-weight: 900;'>AI Plant Doctor</h1>", unsafe_allow_html=True)
-    st.markdown("<h4 style='text-align: center; color: #94a3b8; margin-bottom: 40px;'>Your Smart Agricultural Assistant</h4>", unsafe_allow_html=True)
+    
+    # 🔥 FIX: Solid Neon Green Color with Glowing shadow (Guaranteed to show in Streamlit)
+    st.markdown("<h1 style='color: #10b981; text-shadow: 0 0 25px rgba(16, 185, 129, 0.4); text-align: center; font-size: 5.5rem; font-weight: 900; margin-bottom: 0px;'>🩺 AI Plant Doctor</h1>", unsafe_allow_html=True)
+    
+    st.markdown("<h4 style='text-align: center; color: #888; margin-bottom: 50px; font-weight: 500;'>Your Smart Farming Buddy 🌿</h4>", unsafe_allow_html=True)
 
     if "FIREBASE_API_KEY" not in st.secrets:
         st.error("⚠️ FIREBASE_API_KEY missing in secrets.toml")
         return
     api_key = st.secrets["FIREBASE_API_KEY"]
 
-    # Use columns to center the login box and make it comfortably wide
-    col1, col2, col3 = st.columns([1, 1.2, 1])
+    col1, col2, col3 = st.columns([1, 1.3, 1])
     
     with col2:
         st.markdown('<div class="login-container">', unsafe_allow_html=True)
-        tab1, tab2 = st.tabs(["🔑 Secure Login", "📝 Create Account"])
+        tab1, tab2 = st.tabs(["🔓 Login", "✨ Sign Up"])
         
         with tab1:
-            st.markdown("### Welcome Back")
+            st.markdown("<h3 style='margin-bottom: 25px; color:#fff;'>Welcome Back!</h3>", unsafe_allow_html=True)
             login_email = st.text_input("Email", key="login_email", placeholder="farmer@example.com")
             login_password = st.text_input("Password", type="password", key="login_password", placeholder="••••••••")
             
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Login", use_container_width=True):
+            if st.button("Let's Go! 🚀", use_container_width=True):
                 if login_email and login_password:
-                    with st.spinner("Authenticating..."):
+                    with st.spinner("Logging you in..."):
                         res = firebase_login(login_email, login_password, api_key)
                         if "error" in res:
-                            st.error(f"❌ {res['error'].get('message', 'Login failed')}")
+                            st.error(f"❌ Oops: {res['error'].get('message', 'Login failed')}")
                         else:
                             st.session_state["logged_in"] = True
                             st.session_state["user_email"] = res["email"]
@@ -393,24 +520,24 @@ def render_auth_page():
                             st.session_state["just_logged_in"] = True
                             st.rerun()
                 else:
-                    st.warning("Enter email and password.")
+                    st.warning("Please enter your email and password.")
                     
         with tab2:
-            st.markdown("### Join AI Plant Doctor")
-            signup_email = st.text_input("Email", key="signup_email", placeholder="farmer@example.com")
-            signup_password = st.text_input("Password", type="password", key="signup_password", placeholder="Min 6 characters")
+            st.markdown("<h3 style='margin-bottom: 25px; color:#fff;'>Join the Community</h3>", unsafe_allow_html=True)
+            signup_email = st.text_input("Enter Email", key="signup_email", placeholder="farmer@example.com")
+            signup_password = st.text_input("Create Password", type="password", key="signup_password", placeholder="At least 6 characters")
             
             st.markdown("<br>", unsafe_allow_html=True)
-            if st.button("Sign Up", use_container_width=True):
+            if st.button("Create Account 🎉", use_container_width=True):
                 if signup_email and len(signup_password) >= 6:
-                    with st.spinner("Creating profile..."):
+                    with st.spinner("Setting things up..."):
                         res = firebase_signup(signup_email, signup_password, api_key)
                         if "error" in res:
-                            st.error(f"❌ {res['error'].get('message', 'Signup failed')}")
+                            st.error(f"❌ Oops: {res['error'].get('message', 'Registration failed')}")
                         else:
-                            st.success("✅ Account created successfully! Please switch to the Login tab.")
+                            st.success("✅ Awesome! Account created. Now just log in.")
                 else:
-                    st.warning("Valid email and 6+ char password required.")
+                    st.warning("Needs a valid email and a 6+ char password.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -418,16 +545,14 @@ def render_auth_page():
 # UNLOCKED MAIN APP
 # ==========================
 def main_app():
-    # Show sidebar control when logged in
     st.markdown("""<style>[data-testid="collapsedControl"] {display: block;}</style>""", unsafe_allow_html=True)
 
-    # 5-SECOND FLOATING USERNAME POPUP
     if st.session_state.get("just_logged_in"):
         st.session_state["just_logged_in"] = False
         st.markdown(
             f"""
             <div class="welcome-float">
-                👋 Welcome, <span style="color:#a7f3d0;">{st.session_state['username']}</span>! Let's heal some plants.
+                <span>🌿</span> Welcome back, <span style="color:#a7f3d0;">{st.session_state['username']}</span>!
             </div>
             """,
             unsafe_allow_html=True
@@ -436,7 +561,7 @@ def main_app():
     # --------------------------
     # Logged-In Sidebar
     # --------------------------
-    st.sidebar.markdown(f"### 👤 Profile")
+    st.sidebar.markdown(f"### 👤 My Profile")
     st.sidebar.info(f"**{st.session_state['username']}**\n\n{st.session_state['user_email']}")
     
     if st.sidebar.button("🚪 Logout"):
@@ -449,9 +574,9 @@ def main_app():
     if DEVICE == "cuda":
         try: name = torch.cuda.get_device_name(0)
         except: name = "CUDA GPU"
-        st.sidebar.success(f"🚀 Powered by: {name}")
+        st.sidebar.success(f"🚀 Running fast on: {name}")
     else:
-        st.sidebar.warning("⚡ Running on CPU.")
+        st.sidebar.warning("⚡ Running on CPU")
     st.sidebar.markdown("---")
 
     # --------------------------
@@ -460,8 +585,8 @@ def main_app():
     if "weather_info" not in st.session_state: st.session_state.weather_info = None
     if "manual_city" not in st.session_state: st.session_state.manual_city = ""
 
-    st.sidebar.header("🌦️ Field Weather")
-    st.session_state.manual_city = st.sidebar.text_input("Enter City (e.g., Mumbai)", value=st.session_state.manual_city)
+    st.sidebar.header("🌦️ Weather Check")
+    st.session_state.manual_city = st.sidebar.text_input("Enter City (India)", value=st.session_state.manual_city, placeholder="e.g. Pune")
 
     if st.sidebar.button("Get Weather"):
         city = st.session_state.manual_city.strip()
@@ -472,8 +597,8 @@ def main_app():
             forecast = get_forecast_3h(city_name, st.secrets["OPENWEATHER_KEY"])
             if cur and cur.get("cod") != 401:
                 st.session_state.weather_info = {"city": city_name, "current": cur, "forecast3h": forecast}
-                st.sidebar.success(f"Weather updated: {city_name}")
-            else: st.sidebar.error("Error fetching weather.")
+                st.sidebar.success(f"Weather fetched for {city_name}!")
+            else: st.sidebar.error("Couldn't fetch weather right now.")
 
     if st.session_state.get("weather_info"):
         info = st.session_state["weather_info"]
@@ -487,7 +612,7 @@ def main_app():
     # --------------------------
     col_main, col_lang = st.columns([3, 1])
     with col_lang:
-        selected_label = st.selectbox("🌐 Translation & Voice", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
+        selected_label = st.selectbox("🌐 Choose Language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
         target_lang_code = LANGUAGES.get(selected_label, "en")
         translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
 
@@ -496,81 +621,95 @@ def main_app():
         except Exception: return text
 
     with col_main:
-        st.title(t("🩺 AI Plant Doctor Core"))
-        st.markdown(t("Upload a close-up photo of the affected leaf for instant diagnosis and AI-generated treatment."))
+        title_text = t('AI Plant Doctor')
+        # 🔥 FIX: Solid Neon Green Color with Glowing shadow (Guaranteed to show in Streamlit)
+        st.markdown(
+            f"<h1 style='color: #10b981; text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); font-size: 4rem; font-weight: 900; margin-bottom: 0px; padding-bottom: 10px;'>🩺 {title_text}</h1>", 
+            unsafe_allow_html=True
+        )
+        st.markdown(f"<p style='color: #94a3b8; font-size: 1.2rem; margin-top: -15px;'>{t('Upload a clear plant leaf image for diagnosis.')}</p>", unsafe_allow_html=True)
 
     st.markdown("---")
-    uploaded_file = st.file_uploader(t("📤 Upload a leaf image"), type=["jpg", "jpeg", "png"])
+    uploaded_file = st.file_uploader(t("📤 Upload Leaf Image"), type=["jpg", "jpeg", "png"])
     
     if uploaded_file:
         image = Image.open(uploaded_file).convert("RGB")
-        # Ensure image takes up reasonable space without being huge
         col_img, _ = st.columns([1, 1])
-        with col_img:
-            st.image(image, caption=t("Uploaded Image"), use_column_width=True)
+        
+        img_display = col_img.empty()
+        img_display.image(image, caption=t("Your Photo"), use_column_width=True)
 
-        if st.button(t("🔍 Analyze Plant Health"), use_container_width=True):
+        if st.button(t("🔍 Analyze Plant"), use_container_width=True):
             if not is_clear_leaf_image(image):
-                st.error(t("❌ Image is blurry or not a leaf"))
+                st.error(t("❌ Image is blurry. Please upload a clear photo."))
             else:
                 detector = load_plant_detector()
-                with st.spinner(t("Scanning leaf biology...")):
+                with st.spinner(t("Checking image...")):
                     plant_ok, plant_conf = is_plant_image(image, detector)
 
                 if not plant_ok or plant_conf < 90:
-                    st.error(t("❌ Uploaded image is NOT a clear plant"))
-                    st.warning(t("Please upload a close-up leaf with plain background"))
+                    st.error(t("❌ This doesn't look like a clear plant leaf."))
+                    st.warning(t("Try taking a closer photo of just the leaf."))
                 else:
-                    st.success(t(f"✅ Plant verified ({plant_conf:.2f}%)"))
-
                     try:
                         model = load_classifier()
                         class_names = get_class_names()
-                        with st.spinner(t("Running Neural Network...")):
+                        with st.spinner(t("Analyzing leaf...")):
                             prediction, confidence = predict(image, model, class_names)
                             
-                            st.success(f"🌿 {t('Diagnosis')}: {t(prediction)} (Conf: {confidence:.2f}%)")
+                            # ---------------------------------------------
+                            # PLANTIX-STYLE DYNAMIC IMAGE OVERLAY
+                            # ---------------------------------------------
+                            annotated_img = draw_plantix_overlay(image, prediction, confidence)
+                            img_display.image(annotated_img, caption=t("AI Result Overlay"), use_column_width=True)
+                            # ---------------------------------------------
 
                             if str(prediction).lower() == "healthy":
                                 st.balloons()
-                                st.success(t("Great news! The plant looks healthy. Keep up the good work!"))
+                                st.success(t("Yay! Your plant looks perfectly healthy. 🎉"))
                             else:
-                                with st.spinner(t("Generating AI Treatment Protocol...")):
+                                with st.spinner(t("Finding the best treatment...")):
                                     treatment_en = generate_treatment_with_ai(prediction)
                                     translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
 
-                                st.subheader(t("AI-Generated Treatment Plan"))
+                                st.subheader(t("AI Treatment Plan 💡"))
                                 st.info(translated_treatment)
 
-                                with st.spinner(t("Generating Voice Assistant...")):
+                                with st.spinner(t("Creating voice audio...")):
                                     treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
                                 if treatment_audio and len(treatment_audio) > 10:
                                     st.audio(treatment_audio, format="audio/mp3")
-                                    st.download_button(label=t("⬇️ Download Audio"), data=treatment_audio, file_name="treatment.mp3", mime="audio/mpeg")
+                                    st.download_button(label=t("⬇️ Download Audio Advice"), data=treatment_audio, file_name="treatment_advice.mp3", mime="audio/mpeg")
                     except Exception as e:
-                        st.error(f"Engine Error: {e}")
+                        st.error(f"Oops, something went wrong: {e}")
 
     # Weather Risk Section
     st.markdown("---")
-    st.header(t("🌦️ AI Weather Risk Analysis"))
+    
+    # 🔥 FIX: Same robust glowing style applied to the Weather heading
+    st.markdown(
+        f"<h2 style='color: #10b981; text-shadow: 0 0 15px rgba(16, 185, 129, 0.4); font-weight: 800;'>{t('🌦️ Weather & Disease Risk')}</h2>", 
+        unsafe_allow_html=True
+    )
+    
     if not st.session_state.get("weather_info"):
-        st.info(t("Set your City in the sidebar to get weather-based disease risk predictions."))
+        st.info(t("Enter your city in the sidebar to see if the weather might harm your plants."))
     else:
         info = st.session_state["weather_info"]
         todays_items = get_todays_forecast_from_3h(info.get("forecast3h"))
         if todays_items:
-            with st.spinner(t("Analyzing weather conditions...")):
+            with st.spinner(t("Checking weather risks...")):
                 raw_risk = assess_weather_risk_with_ai(todays_items, info.get("city",""), st.secrets.get("GEMINI_API_KEY"))
                 translated_risk = raw_risk if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(raw_risk)
             st.warning(translated_risk)
         else:
-            st.info(t("Detailed forecast unavailable currently."))
+            st.info(t("Not enough weather data to calculate risk right now."))
 
     st.markdown("---")
-    st.caption("© 2026 AI Plant Doctor — Empowering Farmers with AI 🌾")
+    st.caption("© 2026 AI Plant Doctor — Your Smart Farming Buddy 🌾")
 
     # --------------------------
-    # Floating Chat Widget (Protected)
+    # Floating Chat Widget
     # --------------------------
     chatbot_url = "https://light-yagami980.diaflow.app/public-chat/RGMNeOWpcT"
     floating_widget = f"""
@@ -578,7 +717,7 @@ def main_app():
     #floatingChatContainer {{ position: fixed; bottom: 0; right: 0; z-index: 999999999; pointer-events: none; }}
     #chatButton {{ width: 65px; height: 65px; background: linear-gradient(135deg, #10b981, #059669); color: white; border-radius: 50%; border: none; font-size: 30px; cursor: pointer; margin: 20px; box-shadow: 0px 4px 15px rgba(16,185,129,0.5); pointer-events: auto; transition: transform 0.3s; }}
     #chatButton:hover {{ transform: scale(1.1); }}
-    #chatFrame {{ width: 360px; height: 480px; border-radius: 14px; border: none; display: none; margin-right: 20px; margin-bottom: 95px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); pointer-events: auto; }}
+    #chatFrame {{ width: 360px; height: 480px; border-radius: 14px; border: none; display: none; margin-right: 20px; margin-bottom: 95px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); pointer-events: auto; }}
     </style>
     <div id="floatingChatContainer">
         <iframe id="chatFrame" src="{chatbot_url}"></iframe>
