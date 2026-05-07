@@ -408,27 +408,27 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
 # --------------------------
 # Gemini AI treatment
 # --------------------------
-def generate_treatment_with_ai(disease_name: str, extra_notes: str = "") -> str:
+def generate_treatment_with_ai(disease_name: str, username: str, extra_notes: str = "") -> str:
     if "GEMINI_API_KEY" not in st.secrets:
         return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"You are an expert plant doctor. A farmer's leaf is diagnosed with '{disease_name}'."
+        prompt = f"You are an expert plant doctor talking directly to {username}. Start your response with 'Hello {username},'. A farmer's leaf is diagnosed with '{disease_name}'."
         if extra_notes:
-            prompt += f" The farmer also provided these extra details: '{extra_notes}'."
+            prompt += f" {username} also provided these extra details: '{extra_notes}'."
         prompt += "\nProvide: 1. A short cause summary. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."
         return model.generate_content(prompt).text.strip()
     except Exception as e:
         return f"⚠️ AI generation failed: {e}"
 
-def generate_treatment_from_text(symptoms: str) -> str:
+def generate_treatment_from_text(symptoms: str, username: str) -> str:
     if "GEMINI_API_KEY" not in st.secrets:
         return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"""You are an expert plant doctor. A farmer does not have a photo but describes these symptoms: '{symptoms}'.
+        prompt = f"""You are an expert plant doctor talking directly to {username}. Start your response with 'Hello {username},'. {username} does not have a photo but describes these symptoms: '{symptoms}'.
         Provide: 1. Possible causes/diseases based on the symptoms. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."""
         return model.generate_content(prompt).text.strip()
     except Exception as e:
@@ -539,6 +539,10 @@ def render_auth_page():
                             st.rerun()
                 else:
                     st.warning("Please enter your email and password.")
+                
+                st.markdown("<div style='text-align: center; margin: 15px 0; color: #666;'>OR</div>", unsafe_allow_html=True)
+                if st.button("🌐 Sign in with Google", key="google_login", use_container_width=True):
+                    st.info("ℹ️ Google OAuth setup required in Firebase. For this demo, please use Email/Password.")
                     
         with tab2:
             st.markdown("<h3 style='margin-bottom: 25px; color:#fff;'>Join the Community</h3>", unsafe_allow_html=True)
@@ -556,6 +560,10 @@ def render_auth_page():
                             st.success("✅ Awesome! Account created. Now just log in.")
                 else:
                     st.warning("Needs a valid email and a 6+ char password.")
+            
+            st.markdown("<div style='text-align: center; margin: 15px 0; color: #666;'>OR</div>", unsafe_allow_html=True)
+            if st.button("🌐 Sign up with Google", key="google_signup", use_container_width=True):
+                st.info("ℹ️ Google OAuth setup required in Firebase. For this demo, please use Email/Password.")
         
         st.markdown('</div>', unsafe_allow_html=True)
 
@@ -577,23 +585,8 @@ def main_app():
         )
 
     # --------------------------
-    # Logged-In Sidebar
+    # Logged-In Sidebar (Removed Profile & Logout)
     # --------------------------
-    st.sidebar.markdown(f"### 👤 My Profile")
-    st.sidebar.info(f"**{st.session_state['username']}**\n\n{st.session_state['user_email']}")
-    
-    if st.sidebar.button("🚪 Logout"):
-        st.session_state["logged_in"] = False
-        st.session_state["user_email"] = ""
-        st.session_state["username"] = ""
-        
-        # Logout karte time URL se info hata do
-        if "auth_user" in st.query_params:
-            del st.query_params["auth_user"]
-            
-        st.rerun()
-        
-    st.sidebar.markdown("---")
     if DEVICE == "cuda":
         try: name = torch.cuda.get_device_name(0)
         except: name = "CUDA GPU"
@@ -629,13 +622,30 @@ def main_app():
             st.sidebar.caption(cur["weather"][0]["description"].title())
 
     # --------------------------
-    # Main App UI Header
+    # Main App UI Header & Settings Bar
     # --------------------------
-    col_main, col_lang = st.columns([3, 1])
-    with col_lang:
-        selected_label = st.selectbox("🌐 Choose Language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
-        target_lang_code = LANGUAGES.get(selected_label, "en")
-        translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
+    col_main, col_settings = st.columns([3, 1])
+    
+    with col_settings:
+        with st.popover("⚙️ Settings", use_container_width=True):
+            st.markdown(f"### 👤 {st.session_state['username']}")
+            st.caption(st.session_state['user_email'])
+            st.markdown("---")
+            
+            # Moved Language Selector inside Settings
+            selected_label = st.selectbox("🌐 Choose Language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
+            target_lang_code = LANGUAGES.get(selected_label, "en")
+            
+            st.markdown("---")
+            if st.button("🚪 Logout", use_container_width=True):
+                st.session_state["logged_in"] = False
+                st.session_state["user_email"] = ""
+                st.session_state["username"] = ""
+                if "auth_user" in st.query_params:
+                    del st.query_params["auth_user"]
+                st.rerun()
+
+    translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
         
     def t(text: str) -> str:
         try: return text if selected_label == "English" else translator_ui.translate(text)
@@ -648,7 +658,7 @@ def main_app():
             f"<h1 style='color: #10b981; text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); font-size: 4rem; font-weight: 900; margin-bottom: 0px; padding-bottom: 10px;'>🩺 {title_text}</h1>", 
             unsafe_allow_html=True
         )
-        st.markdown(f"<p style='color: #94a3b8; font-size: 1.2rem; margin-top: -15px;'>{t('Diagnose plant diseases instantly using AI.')}</p>", unsafe_allow_html=True)
+        st.markdown(f"<p style='color: #94a3b8; font-size: 1.2rem; margin-top: -15px;'>{t('Hello')} <span style='color: #10b981; font-weight: bold;'>{st.session_state['username']}</span>, {t('diagnose plant diseases instantly using AI.')}</p>", unsafe_allow_html=True)
     st.markdown("---")
 
     # ==========================
@@ -707,8 +717,8 @@ def main_app():
                                     st.success(t("Yay! Your plant looks perfectly healthy. 🎉"))
                                 else:
                                     with st.spinner(t("Finding the best treatment...")):
-                                        # Pass the "type box" info to the AI too
-                                        treatment_en = generate_treatment_with_ai(prediction, extra_notes=extra_symptoms)
+                                        # Pass the "type box" info and username to the AI too
+                                        treatment_en = generate_treatment_with_ai(prediction, st.session_state['username'], extra_notes=extra_symptoms)
                                         translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
                                         
                                     st.subheader(t("AI Treatment Plan 💡"))
@@ -735,7 +745,7 @@ def main_app():
             if symptoms_text.strip():
                 with st.spinner(t("Analyzing your description...")):
                     try:
-                        advice_en = generate_treatment_from_text(symptoms_text)
+                        advice_en = generate_treatment_from_text(symptoms_text, st.session_state['username'])
                         translated_advice = advice_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(advice_en)
                         
                         st.subheader(t("AI Disease Analysis & Treatment 💡"))
