@@ -200,14 +200,20 @@ st.markdown(
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # --------------------------
-# Session States
+# Session States & Auto-Login
 # --------------------------
 if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-if "user_email" not in st.session_state:
-    st.session_state["user_email"] = ""
-if "username" not in st.session_state:
-    st.session_state["username"] = ""
+    # URL check karega ki user refresh karne se pehle logged in tha ya nahi
+    if "auth_user" in st.query_params:
+        st.session_state["logged_in"] = True
+        st.session_state["user_email"] = st.query_params["auth_user"]
+        st.session_state["username"] = st.query_params["auth_user"].split("@")[0].capitalize()
+        st.session_state["just_logged_in"] = False
+    else:
+        st.session_state["logged_in"] = False
+        st.session_state["user_email"] = ""
+        st.session_state["username"] = ""
+
 if "just_logged_in" not in st.session_state:
     st.session_state["just_logged_in"] = False
 
@@ -526,6 +532,10 @@ def render_auth_page():
                             st.session_state["user_email"] = res["email"]
                             st.session_state["username"] = res["email"].split("@")[0].capitalize()
                             st.session_state["just_logged_in"] = True
+                            
+                            # Refresh se bachne ke liye URL mein user info save karo
+                            st.query_params["auth_user"] = res["email"]
+                            
                             st.rerun()
                 else:
                     st.warning("Please enter your email and password.")
@@ -576,6 +586,11 @@ def main_app():
         st.session_state["logged_in"] = False
         st.session_state["user_email"] = ""
         st.session_state["username"] = ""
+        
+        # Logout karte time URL se info hata do
+        if "auth_user" in st.query_params:
+            del st.query_params["auth_user"]
+            
         st.rerun()
         
     st.sidebar.markdown("---")
@@ -794,4 +809,3 @@ if st.session_state["logged_in"]:
     main_app()
 else:
     render_auth_page()
-    
