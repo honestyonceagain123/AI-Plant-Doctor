@@ -1,6 +1,5 @@
 # app.py — AI Plant Doctor (Enterprise True Dark Theme, Plantix-style Image Overlay, Gen-Z Friendly Auth)
 # Requirements: streamlit, torch, torchvision, gTTS, deep_translator, google-generativeai, requests, pandas, pillow, numpy, opencv-python-headless
-
 import os
 import sys
 
@@ -17,16 +16,13 @@ import streamlit as st
 from PIL import Image
 import numpy as np
 import cv2
-
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from deep_translator import GoogleTranslator
 import google.generativeai as genai  # Gemini API
-
 from gtts import gTTS, lang as gtts_langs
 import pandas as pd
-
 import streamlit.components.v1 as components
 
 # --------------------------
@@ -49,12 +45,11 @@ st.markdown(
     }
     
     [data-testid="stHeader"] { background-color: transparent; }
-
     [data-testid="stSidebar"] {
         background-color: #0d0d0d !important;
         border-right: 1px solid #1a1a1a;
     }
-
+    
     /* Enterprise Primary Buttons (Sleek Green) */
     div.stButton > button:first-child {
         background: linear-gradient(135deg, #10b981 0%, #059669 100%);
@@ -79,11 +74,11 @@ st.markdown(
     div.stButton > button:first-child:active {
         transform: translateY(0px);
     }
-
+    
     /* Hide Streamlit Branding */
     #MainMenu { visibility: hidden; }
     footer { visibility: hidden; }
-
+    
     /* Interactive Login Box (Glassmorphism + Neon Edge) */
     .login-container {
         background: #111111;
@@ -100,7 +95,7 @@ st.markdown(
         transform: translateY(-5px);
         border-color: rgba(16, 185, 129, 0.4);
     }
-
+    
     /* Segmented Tabs Styling */
     .stTabs [data-baseweb="tab-list"] {
         background-color: #0a0a0a;
@@ -124,7 +119,7 @@ st.markdown(
         color: white !important;
         box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
     }
-
+    
     /* Custom File Uploader Zone */
     [data-testid="stFileUploadDropzone"] {
         background-color: #0f0f0f !important;
@@ -138,9 +133,9 @@ st.markdown(
         border-color: #10b981 !important;
         box-shadow: 0 0 25px rgba(16, 185, 129, 0.15);
     }
-
-    /* Text Inputs (Ultra Smooth) */
-    .stTextInput input {
+    
+    /* Text Inputs & Areas (Ultra Smooth) */
+    .stTextInput input, .stTextArea textarea {
         background-color: #161616 !important;
         color: #ffffff !important;
         border: 1px solid #2a2a2a !important;
@@ -149,15 +144,15 @@ st.markdown(
         font-size: 15px !important;
         transition: all 0.3s ease;
     }
-    .stTextInput input:focus {
+    .stTextInput input:focus, .stTextArea textarea:focus {
         border-color: #10b981 !important;
         box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2) !important;
         background-color: #1a1a1a !important;
     }
-    .stTextInput input::placeholder {
+    .stTextInput input::placeholder, .stTextArea textarea::placeholder {
         color: #555 !important;
     }
-
+    
     /* Floating Welcome Banner */
     @keyframes slideDownUp {
         0% { top: -100px; opacity: 0; transform: translateX(-50%) scale(0.9); }
@@ -351,7 +346,7 @@ def draw_plantix_overlay(image: Image.Image, prediction: str, confidence: float)
         font_scale = font_scale * ((w * 0.95) / text_size[0])
         thickness = max(1, int(font_scale * 2.5))
         text_size = cv2.getTextSize(display_text, font, font_scale, thickness)[0]
-
+        
     # Center text coordinates
     text_x = (w - text_size[0]) // 2
     text_y = h - int(banner_h / 2) + (text_size[1] // 2)
@@ -407,14 +402,28 @@ def generate_tts_bytes(text: str, lang_code: str = "en") -> bytes:
 # --------------------------
 # Gemini AI treatment
 # --------------------------
-def generate_treatment_with_ai(disease_name: str) -> str:
+def generate_treatment_with_ai(disease_name: str, extra_notes: str = "") -> str:
     if "GEMINI_API_KEY" not in st.secrets:
         return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
     try:
         genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
         model = genai.GenerativeModel('gemini-2.5-flash')
-        prompt = f"""You are an expert plant doctor. A farmer's leaf is diagnosed with '{disease_name}'.
-        Provide: 1. A short cause summary. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."""
+        prompt = f"You are an expert plant doctor. A farmer's leaf is diagnosed with '{disease_name}'."
+        if extra_notes:
+            prompt += f" The farmer also provided these extra details: '{extra_notes}'."
+        prompt += "\nProvide: 1. A short cause summary. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."
+        return model.generate_content(prompt).text.strip()
+    except Exception as e:
+        return f"⚠️ AI generation failed: {e}"
+
+def generate_treatment_from_text(symptoms: str) -> str:
+    if "GEMINI_API_KEY" not in st.secrets:
+        return "⚠️ GEMINI_API_KEY missing from Streamlit secrets."
+    try:
+        genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        prompt = f"""You are an expert plant doctor. A farmer does not have a photo but describes these symptoms: '{symptoms}'.
+        Provide: 1. Possible causes/diseases based on the symptoms. 2. Clear, easy treatment steps. 3. Quick preventive tips. Keep it friendly and simple."""
         return model.generate_content(prompt).text.strip()
     except Exception as e:
         return f"⚠️ AI generation failed: {e}"
@@ -476,7 +485,6 @@ def predict(image: Image.Image, model, class_names):
     name = class_names[idx] if class_names and idx < len(class_names) else f"class_{idx}"
     return name, float(conf.item() * 100.0)
 
-
 # ==========================
 # COOL GEN-Z LOGIN UI
 # ==========================
@@ -489,12 +497,12 @@ def render_auth_page():
     st.markdown("<h1 style='color: #10b981; text-shadow: 0 0 25px rgba(16, 185, 129, 0.4); text-align: center; font-size: 5.5rem; font-weight: 900; margin-bottom: 0px;'>🩺 AI Plant Doctor</h1>", unsafe_allow_html=True)
     
     st.markdown("<h4 style='text-align: center; color: #888; margin-bottom: 50px; font-weight: 500;'>Your Smart Farming Buddy 🌿</h4>", unsafe_allow_html=True)
-
+    
     if "FIREBASE_API_KEY" not in st.secrets:
         st.error("⚠️ FIREBASE_API_KEY missing in secrets.toml")
         return
+        
     api_key = st.secrets["FIREBASE_API_KEY"]
-
     col1, col2, col3 = st.columns([1, 1.3, 1])
     
     with col2:
@@ -546,7 +554,7 @@ def render_auth_page():
 # ==========================
 def main_app():
     st.markdown("""<style>[data-testid="collapsedControl"] {display: block;}</style>""", unsafe_allow_html=True)
-
+    
     if st.session_state.get("just_logged_in"):
         st.session_state["just_logged_in"] = False
         st.markdown(
@@ -584,10 +592,8 @@ def main_app():
     # --------------------------
     if "weather_info" not in st.session_state: st.session_state.weather_info = None
     if "manual_city" not in st.session_state: st.session_state.manual_city = ""
-
     st.sidebar.header("🌦️ Weather Check")
     st.session_state.manual_city = st.sidebar.text_input("Enter City (India)", value=st.session_state.manual_city, placeholder="e.g. Pune")
-
     if st.sidebar.button("Get Weather"):
         city = st.session_state.manual_city.strip()
         if city and "OPENWEATHER_KEY" in st.secrets:
@@ -599,7 +605,7 @@ def main_app():
                 st.session_state.weather_info = {"city": city_name, "current": cur, "forecast3h": forecast}
                 st.sidebar.success(f"Weather fetched for {city_name}!")
             else: st.sidebar.error("Couldn't fetch weather right now.")
-
+            
     if st.session_state.get("weather_info"):
         info = st.session_state["weather_info"]
         if info.get("current"):
@@ -608,82 +614,132 @@ def main_app():
             st.sidebar.caption(cur["weather"][0]["description"].title())
 
     # --------------------------
-    # Main App UI
+    # Main App UI Header
     # --------------------------
     col_main, col_lang = st.columns([3, 1])
     with col_lang:
         selected_label = st.selectbox("🌐 Choose Language", list(LANGUAGES.keys()), index=list(LANGUAGES.keys()).index("English"))
         target_lang_code = LANGUAGES.get(selected_label, "en")
         translator_ui = GoogleTranslator(source="auto", target=target_lang_code)
-
+        
     def t(text: str) -> str:
         try: return text if selected_label == "English" else translator_ui.translate(text)
         except Exception: return text
-
+        
     with col_main:
         title_text = t('AI Plant Doctor')
-        # 🔥 FIX: Solid Neon Green Color with Glowing shadow (Guaranteed to show in Streamlit)
+        # 🔥 FIX: Solid Neon Green Color with Glowing shadow
         st.markdown(
             f"<h1 style='color: #10b981; text-shadow: 0 0 20px rgba(16, 185, 129, 0.4); font-size: 4rem; font-weight: 900; margin-bottom: 0px; padding-bottom: 10px;'>🩺 {title_text}</h1>", 
             unsafe_allow_html=True
         )
-        st.markdown(f"<p style='color: #94a3b8; font-size: 1.2rem; margin-top: -15px;'>{t('Upload a clear plant leaf image for diagnosis.')}</p>", unsafe_allow_html=True)
-
+        st.markdown(f"<p style='color: #94a3b8; font-size: 1.2rem; margin-top: -15px;'>{t('Diagnose plant diseases instantly using AI.')}</p>", unsafe_allow_html=True)
     st.markdown("---")
-    uploaded_file = st.file_uploader(t("📤 Upload Leaf Image"), type=["jpg", "jpeg", "png"])
-    
-    if uploaded_file:
-        image = Image.open(uploaded_file).convert("RGB")
-        col_img, _ = st.columns([1, 1])
+
+    # ==========================
+    # INPUT TABS (With Photo, Without Photo & Type Box)
+    # ==========================
+    tab_image, tab_text = st.tabs([t("📷 Diagnose by Photo"), t("✍️ Diagnose by Symptoms (No Photo)")])
+
+    # --------------------------
+    # TAB 1: Image Diagnosis (Upload or Camera + Text Box)
+    # --------------------------
+    with tab_image:
+        input_col, opt_col = st.columns([2, 1])
         
-        img_display = col_img.empty()
-        img_display.image(image, caption=t("Your Photo"), use_column_width=True)
-
-        if st.button(t("🔍 Analyze Plant"), use_container_width=True):
-            if not is_clear_leaf_image(image):
-                st.error(t("❌ Image is blurry. Please upload a clear photo."))
+        with input_col:
+            img_source = st.radio(t("Select Image Source:"), [t("Upload File"), t("Use Camera")], horizontal=True)
+            img_data = None
+            
+            if img_source == t("Upload File"):
+                img_data = st.file_uploader(t("📤 Upload Leaf Image"), type=["jpg", "jpeg", "png"])
             else:
-                detector = load_plant_detector()
-                with st.spinner(t("Checking image...")):
-                    plant_ok, plant_conf = is_plant_image(image, detector)
-
-                if not plant_ok or plant_conf < 90:
-                    st.error(t("❌ This doesn't look like a clear plant leaf."))
-                    st.warning(t("Try taking a closer photo of just the leaf."))
+                img_data = st.camera_input(t("📸 Take Photo of Leaf"))
+                
+        with opt_col:
+            extra_symptoms = st.text_area(t("Optional: Describe any other details (e.g. yellow spots, bugs seen)"), height=150)
+            
+        if img_data:
+            image = Image.open(img_data).convert("RGB")
+            col_img, _ = st.columns([1, 1])
+            img_display = col_img.empty()
+            img_display.image(image, caption=t("Your Photo"), use_column_width=True)
+            
+            if st.button(t("🔍 Analyze Plant"), use_container_width=True):
+                if not is_clear_leaf_image(image):
+                    st.error(t("❌ Image is blurry. Please upload a clear photo."))
                 else:
+                    detector = load_plant_detector()
+                    with st.spinner(t("Checking image...")):
+                        plant_ok, plant_conf = is_plant_image(image, detector)
+                        
+                    if not plant_ok or plant_conf < 90:
+                        st.error(t("❌ This doesn't look like a clear plant leaf."))
+                        st.warning(t("Try taking a closer photo of just the leaf."))
+                    else:
+                        try:
+                            model = load_classifier()
+                            class_names = get_class_names()
+                            with st.spinner(t("Analyzing leaf...")):
+                                prediction, confidence = predict(image, model, class_names)
+                                
+                                # PLANTIX-STYLE DYNAMIC IMAGE OVERLAY
+                                annotated_img = draw_plantix_overlay(image, prediction, confidence)
+                                img_display.image(annotated_img, caption=t("AI Result Overlay"), use_column_width=True)
+                                
+                                if str(prediction).lower() == "healthy":
+                                    st.balloons()
+                                    st.success(t("Yay! Your plant looks perfectly healthy. 🎉"))
+                                else:
+                                    with st.spinner(t("Finding the best treatment...")):
+                                        # Pass the "type box" info to the AI too
+                                        treatment_en = generate_treatment_with_ai(prediction, extra_notes=extra_symptoms)
+                                        translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
+                                        
+                                    st.subheader(t("AI Treatment Plan 💡"))
+                                    st.info(translated_treatment)
+                                    
+                                    with st.spinner(t("Creating voice audio...")):
+                                        treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
+                                    if treatment_audio and len(treatment_audio) > 10:
+                                        st.audio(treatment_audio, format="audio/mp3")
+                                        st.download_button(label=t("⬇️ Download Audio Advice"), data=treatment_audio, file_name="treatment_advice.mp3", mime="audio/mpeg")
+                        except Exception as e:
+                            st.error(f"Oops, something went wrong: {e}")
+
+    # --------------------------
+    # TAB 2: Text Diagnosis (Bina Photo / Symptoms Only)
+    # --------------------------
+    with tab_text:
+        st.markdown(f"#### {t('Describe the problem with your plant')}")
+        st.caption(t('If you do not have a photo, simply type what is wrong (e.g. leaves are turning yellow, white powder on stem).'))
+        
+        symptoms_text = st.text_area(t("Type your plant symptoms here:"), height=200, placeholder=t("E.g., Tomato plant leaves are drying up from the edges and turning brown..."))
+        
+        if st.button(t("🔍 Analyze Symptoms Only"), use_container_width=True):
+            if symptoms_text.strip():
+                with st.spinner(t("Analyzing your description...")):
                     try:
-                        model = load_classifier()
-                        class_names = get_class_names()
-                        with st.spinner(t("Analyzing leaf...")):
-                            prediction, confidence = predict(image, model, class_names)
+                        advice_en = generate_treatment_from_text(symptoms_text)
+                        translated_advice = advice_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(advice_en)
+                        
+                        st.subheader(t("AI Disease Analysis & Treatment 💡"))
+                        st.info(translated_advice)
+                        
+                        with st.spinner(t("Creating voice audio...")):
+                            symptom_audio = generate_tts_bytes(translated_advice, lang_code=target_lang_code)
+                        if symptom_audio and len(symptom_audio) > 10:
+                            st.audio(symptom_audio, format="audio/mp3")
+                            st.download_button(label=t("⬇️ Download Audio Advice"), data=symptom_audio, file_name="symptom_advice.mp3", mime="audio/mpeg")
                             
-                            # ---------------------------------------------
-                            # PLANTIX-STYLE DYNAMIC IMAGE OVERLAY
-                            # ---------------------------------------------
-                            annotated_img = draw_plantix_overlay(image, prediction, confidence)
-                            img_display.image(annotated_img, caption=t("AI Result Overlay"), use_column_width=True)
-                            # ---------------------------------------------
-
-                            if str(prediction).lower() == "healthy":
-                                st.balloons()
-                                st.success(t("Yay! Your plant looks perfectly healthy. 🎉"))
-                            else:
-                                with st.spinner(t("Finding the best treatment...")):
-                                    treatment_en = generate_treatment_with_ai(prediction)
-                                    translated_treatment = treatment_en if selected_label == "English" else GoogleTranslator(source="auto", target=target_lang_code).translate(treatment_en)
-
-                                st.subheader(t("AI Treatment Plan 💡"))
-                                st.info(translated_treatment)
-
-                                with st.spinner(t("Creating voice audio...")):
-                                    treatment_audio = generate_tts_bytes(translated_treatment, lang_code=target_lang_code)
-                                if treatment_audio and len(treatment_audio) > 10:
-                                    st.audio(treatment_audio, format="audio/mp3")
-                                    st.download_button(label=t("⬇️ Download Audio Advice"), data=treatment_audio, file_name="treatment_advice.mp3", mime="audio/mpeg")
                     except Exception as e:
                         st.error(f"Oops, something went wrong: {e}")
+            else:
+                st.warning(t("Please type some symptoms in the box first."))
 
+    # --------------------------
     # Weather Risk Section
+    # --------------------------
     st.markdown("---")
     
     # 🔥 FIX: Same robust glowing style applied to the Weather heading
@@ -704,10 +760,10 @@ def main_app():
             st.warning(translated_risk)
         else:
             st.info(t("Not enough weather data to calculate risk right now."))
-
+            
     st.markdown("---")
     st.caption("© 2026 AI Plant Doctor — Your Smart Farming Buddy 🌾")
-
+    
     # --------------------------
     # Floating Chat Widget
     # --------------------------
@@ -738,3 +794,4 @@ if st.session_state["logged_in"]:
     main_app()
 else:
     render_auth_page()
+    
